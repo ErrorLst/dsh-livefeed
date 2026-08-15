@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * LiveFeed 搜索源基类模板（Base Template）
+ * dsh-livefeed 搜索源基类模板（Base Template）
  * ═══════════════════════════════════════════════════════════════════════════
  * Host 将本模板与源脚本拼接（program = 模板 + "\n" + 源脚本）后，作为
  * codeRuntime 的 program 运行。源脚本只需实现：
@@ -24,7 +24,7 @@ const DEFAULT_MAX_ITEMS = 15;     // 粗搜默认条目上限
 // ────────────────────────────────────────────────────────────────────────────
 async function coarseSearch(api) {
   throw new Error(
-    '[livefeed] 源脚本未实现 coarseSearch(api)：请返回 [{title, url, snippet?, publishedAt?}]'
+    '[dsh-livefeed] 源脚本未实现 coarseSearch(api)：请返回 [{title, url, snippet?, publishedAt?}]'
   );
 }
 
@@ -99,7 +99,7 @@ function jsonItems(list, opts) {
 // ────────────────────────────────────────────────────────────────────────────
 function _normalizeTitles(items, cfg) {
   if (!Array.isArray(items)) {
-    throw new Error('[livefeed] coarseSearch 必须返回数组');
+    throw new Error('[dsh-livefeed] coarseSearch 必须返回数组');
   }
   const max = (cfg && cfg.maxItems) || DEFAULT_MAX_ITEMS;
   const seen = new Set();
@@ -123,17 +123,17 @@ function _normalizeTitles(items, cfg) {
 
 function _normalizeContent(out) {
   if (!out || typeof out !== 'object') {
-    throw new Error('[livefeed] fineSearch 必须返回 { text }');
+    throw new Error('[dsh-livefeed] fineSearch 必须返回 { text }');
   }
   const text = String(out.text || '').trim();
-  if (!text) throw new Error('[livefeed] fineSearch 返回的正文为空');
+  if (!text) throw new Error('[dsh-livefeed] fineSearch 返回的正文为空');
   return { text: text.slice(0, MAX_CONTENT_CHARS) };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // 调度器（模板内置；源脚本无需关心）
 // ────────────────────────────────────────────────────────────────────────────
-async function _livefeedDispatcher() {
+async function _dshLivefeedDispatcher() {
   const mode = await api.mode();
   if (mode === 'titles') {
     return _normalizeTitles(await coarseSearch(api), await api.config());
@@ -142,7 +142,7 @@ async function _livefeedDispatcher() {
     const item = await api.item();
     return _normalizeContent(await fineSearch(api, item));
   }
-  throw new Error('[livefeed] 未知模式: ' + String(mode));
+  throw new Error('[dsh-livefeed] 未知模式: ' + String(mode));
 }
 
-return await _livefeedDispatcher();
+return await _dshLivefeedDispatcher();

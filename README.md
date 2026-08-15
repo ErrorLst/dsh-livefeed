@@ -1,4 +1,4 @@
-# LiveFeed · 实时讯息面板
+# dsh-livefeed · 实时讯息面板
 
 > DSH（DeepSeek Harness）动态 Cordis 插件：在 GUI **右边缘的悬浮面板**（可折叠）中，每隔可配置的时间（默认 10 分钟）从可配置的「搜索源脚本」采集你感兴趣的内容，由大模型筛选并生成**摘要卡片**；点击卡片在新标签页打开原文。
 
@@ -30,7 +30,7 @@
 
 ### 2. 配置文件
 
-默认配置目录：`<工作区>\.dsh\livefeed\`（Host 源码中的常量，可按需修改）。
+默认配置目录：`<工作区>\.dsh\dsh-livefeed\`（Host 源码中的常量，可按需修改）。
 
 | 文件 | 说明 |
 | --- | --- |
@@ -51,7 +51,7 @@
 ## 项目结构
 
 ```
-livefeed/
+dsh-livefeed/
 ├── src/
 │   ├── host/plugin.js          # Host 半（定时采集管线 + RPC）
 │   ├── client/plugin.js        # Client 半（悬浮面板 UI + 轮询）

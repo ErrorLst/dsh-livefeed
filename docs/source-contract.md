@@ -42,7 +42,7 @@ Host 将模板与源脚本拼接（`program = 模板 + "\n" + 源脚本`）后�
 | `decodeEntities(s)` | HTML 实体解码 |
 | `jsonItems(list, opts)` | 将 JSON API 列表规整为 items；opts：`{titleKey, urlKey, snippetKey?, publishedAtKey?, urlFallback?}` |
 
-**保留名（源脚本不要重新声明）**：`coarseSearch`、`fineSearch`、`searchWeb`、`fetchPage`、`htmlToText`、`decodeEntities`、`jsonItems`、`MAX_CONTENT_CHARS`、`DEFAULT_MAX_ITEMS`、`_normalizeTitles`、`_normalizeContent`、`_livefeedDispatcher`、`api`。
+**保留名（源脚本不要重新声明）**：`coarseSearch`、`fineSearch`、`searchWeb`、`fetchPage`、`htmlToText`、`decodeEntities`、`jsonItems`、`MAX_CONTENT_CHARS`、`DEFAULT_MAX_ITEMS`、`_normalizeTitles`、`_normalizeContent`、`_dshLivefeedDispatcher`、`api`。
 
 ## 5. 新增搜索源（三步）
 

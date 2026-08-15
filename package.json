@@ -1,5 +1,5 @@
 {
-  "name": "livefeed",
+  "name": "dsh-livefeed",
   "version": "0.1.0",
   "private": true,
   "description": "DSH 实时讯息面板插件：定时从可配置的搜索源脚本采集内容，由大模型筛选与摘要，在 GUI 右缘悬浮面板以卡片展示",

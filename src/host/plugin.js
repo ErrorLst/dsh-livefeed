@@ -14,7 +14,7 @@ return {
   inject: ['timer', 'web', 'llm', 'fs', 'agentDefaultModel'],
   apply(ctx) {
     // ══ 常量 ══
-    const CONFIG_DIR = 'C:\\Users\\zhoujin\\Pictures\\dsh-workspace\\.dsh\\livefeed';
+    const CONFIG_DIR = 'C:\\Users\\zhoujin\\Pictures\\dsh-workspace\\.dsh\\dsh-livefeed';
     const CONFIG_FILE = CONFIG_DIR + '\\config.json';
     const TEMPLATE_FILE = CONFIG_DIR + '\\sources\\_template.js';
     const DEFAULT_INTERVAL_MS = 10 * 60 * 1000;
@@ -54,7 +54,7 @@ return {
 
     function callModel(system, userText, maxTokens) {
       // TODO(评审后)：llm.stream({provider, model, reasoningEffort?,
-      //   system, messages:[{id:'livefeed-<n>', role:'user',
+      //   system, messages:[{id:'dsh-livefeed-<n>', role:'user',
       //     content:[{type:'text',text:userText}], source:{kind:'user'}}],
       //   maxTokens}) 收集 text-delta；容错 JSON 提取
       return Promise.resolve(null);
@@ -91,7 +91,7 @@ return {
         //   去重（recentUrls）→ 落 state.cards（上限 maxCards）→ 更新状态
       } catch (err) {
         state.lastError = String((err && err.message) || err);
-        console.error('[livefeed] cycle failed:', err);
+        console.error('[dsh-livefeed] cycle failed:', err);
       } finally {
         state.running = false;
         state.lastRunAt = Date.now();
@@ -100,7 +100,7 @@ return {
     }
 
     // ══ RPC（Package 私有，Client→Host）══
-    harness.handle('livefeed/cards', async () => ({
+    harness.handle('dsh-livefeed/cards', async () => ({
       cards: state.cards,
       status: {
         running: state.running,
@@ -110,7 +110,7 @@ return {
       },
     }));
 
-    harness.handle('livefeed/refresh', async () => {
+    harness.handle('dsh-livefeed/refresh', async () => {
       if (state.running) return { accepted: false };
       runCycle(); // 异步触发，不阻塞
       return { accepted: true };

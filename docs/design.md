@@ -19,9 +19,9 @@
 ```
 ┌─ Client（浏览器）──────────────────────────────────┐
 │ shell.overlay 槽位 → 悬浮面板（position:fixed 右缘）     │
-│ 15s 轮询 host.call('livefeed/cards')；卡片=<a target=_blank> │
+│ 15s 轮询 host.call('dsh-livefeed/cards')；卡片=<a target=_blank> │
 └──────────────▲──────────────────▲──────────────────┘
-    host.call('livefeed/refresh')   host.call('livefeed/cards')
+    host.call('dsh-livefeed/refresh')   host.call('dsh-livefeed/cards')
 ┌──────────────┴──────────────────┴──────────────────┐
 │ Host（定时管线，每 intervalMinutes 一个周期）               │
 │ ①读配置/脚本(fs) → ②粗搜(模板+源脚本,codeRuntime)          │
@@ -50,7 +50,7 @@
 - 消息手工构造（动态插件无 import 能力，无法使用 `createUserMessage` 工厂，但形状一致）：
 
 ```js
-{ id: 'livefeed-<n>', role: 'user',
+{ id: 'dsh-livefeed-<n>', role: 'user',
   content: [{ type: 'text', text: '…' }],
   source: { kind: 'user' } }
 ```
@@ -86,35 +86,35 @@
 - 动态插件定义：`cordis_define`（idPrefix `live`），Host 半 = `src/host/plugin.js` 函数体，Client 半 = `src/client/plugin.js` 函数体；`cordis_run` 激活。
 - 依赖注入：`inject: ['timer','web','llm','fs','agentDefaultModel']`；`codeRuntime`、`shell` 用 `ctx.get()` 可选读取（`codeRuntime` 缺失时回退 `shell.run('node <script>')` 执行源脚本、解析 stdout JSON）。
 - 副作用归属：定时器经 `ctx.effect(() => ctx.interval(...))`；RPC 经 `harness.handle`；UI 经 `slots.inject` 注册 —— 插件 stop/update 时全部自动清理。
-- 配置目录常量：`C:\Users\zhoujin\Pictures\dsh-workspace\.dsh\livefeed`（可改）。
+- 配置目录常量：`C:\Users\zhoujin\Pictures\dsh-workspace\.dsh\dsh-livefeed`（可改）。
 
 ## 6. RPC 契约（Package 私有）
 
 | method | 入参 | 返回 |
 | --- | --- | --- |
-| `livefeed/cards` | — | `{ cards: [{id,title,summary,url,sourceName,publishedAt?,isNew}], status: {running, lastRunAt?, sourceErrors:[{sourceId,message}]} }` |
-| `livefeed/refresh` | — | `{ accepted: boolean }`（运行中则幂等拒绝） |
-| `livefeed/model-catalog` | — | `{ providers: [{id, name, models: [{id, name, efforts: [{id, name}]}]}] }`（面板「模型选择」级联数据源，来自 `llm.listProviders()/listModels()/resolveModelInfo()`） |
-| `livefeed/update-settings` | `{ intervalMinutes?, model?, sources?: [{id, enabled}] }` | `{ ok: boolean, error? }`（增量合并写回 `config.json`，下一周期生效） |
-| `livefeed/mark` | `{ cardId, read?, feedback?: 'dislike' }` | `{ ok }`（写 `state.json`：已读 / 不感兴趣；仅支持负面反馈，防信息茧房） |
-| `livefeed/rules` | — | `{ rules }`（当前规则文档 `preferences.json`） |
-| `livefeed/rerun-rules` | — | `{ accepted }`（触发一次规则重训，运行中则幂等拒绝） |
+| `dsh-livefeed/cards` | — | `{ cards: [{id,title,summary,url,sourceName,publishedAt?,isNew}], status: {running, lastRunAt?, sourceErrors:[{sourceId,message}]} }` |
+| `dsh-livefeed/refresh` | — | `{ accepted: boolean }`（运行中则幂等拒绝） |
+| `dsh-livefeed/model-catalog` | — | `{ providers: [{id, name, models: [{id, name, efforts: [{id, name}]}]}] }`（面板「模型选择」级联数据源，来自 `llm.listProviders()/listModels()/resolveModelInfo()`） |
+| `dsh-livefeed/update-settings` | `{ intervalMinutes?, model?, sources?: [{id, enabled}] }` | `{ ok: boolean, error? }`（增量合并写回 `config.json`，下一周期生效） |
+| `dsh-livefeed/mark` | `{ cardId, read?, feedback?: 'dislike' }` | `{ ok }`（写 `state.json`：已读 / 不感兴趣；仅支持负面反馈，防信息茧房） |
+| `dsh-livefeed/rules` | — | `{ rules }`（当前规则文档 `preferences.json`） |
+| `dsh-livefeed/rerun-rules` | — | `{ accepted }`（触发一次规则重训，运行中则幂等拒绝） |
 
 ### 6.1 面板设置
 
 头部齿轮按钮进入设置视图（见 [HTML 原型](../prototype/prototype.html)），包含三块：
 
-1. **模型选择**：提供商 → 模型 → 思考等级（reasoning effort）级联下拉；「跟随当前默认模型」开关对应 `config.model = null`（用 `agentDefaultModel.currentSelection()`）。级联数据来自 `livefeed/model-catalog`。
+1. **模型选择**：提供商 → 模型 → 思考等级（reasoning effort）级联下拉；「跟随当前默认模型」开关对应 `config.model = null`（用 `agentDefaultModel.currentSelection()`）。级联数据来自 `dsh-livefeed/model-catalog`。
 2. **刷新间隔**：分钟数输入（1–1440），对应 `config.intervalMinutes`。
 3. **搜索源管理**：每个源一行 + 开关，对应 `sources[].enabled`；关闭的源在周期 0 装载阶段跳过。
 
-保存经 `livefeed/update-settings` 增量合并写回 `config.json`（`fs.writeText`），不覆盖脚本字段（`script/query` 等保留）。
+保存经 `dsh-livefeed/update-settings` 增量合并写回 `config.json`（`fs.writeText`），不覆盖脚本字段（`script/query` 等保留）。
 
 ## 7. 阅读状态、用户反馈与过滤规则学习（v2 新增）
 
 ### 7.1 阅读状态与分组
 
-- 每张卡片有 `read: boolean`；点击卡片（打开原文）后自动置为已读（Client 在 `<a>` 的 click 中先调 `livefeed/mark` 再放行新标签页）。
+- 每张卡片有 `read: boolean`；点击卡片（打开原文）后自动置为已读（Client 在 `<a>` 的 click 中先调 `dsh-livefeed/mark` 再放行新标签页）。
 - 面板列表**四层分组**（原型已验证）：**最新**（本轮新到，`isNew`）→ **未读**（之前周期的未读）→ **已读** → **不感兴趣**（`feedback==='dislike'`，可随时浏览回顾）；`isNew` 徽标仅「最新」组显示，已读卡片标题降饱和。
 - 每个分组头部可点击**折叠/展开**（折叠状态为页面级内存态，不持久化）。
 
@@ -154,7 +154,7 @@
 - **增量学习**：每周期末尾，`feedbackQueue` 有未消费标记时，一次 llm 调用：输入=当前规则+新增「不感兴趣」标记 → 输出=更新后规则（**只允许向 `block`/`semanticNotes` 增加负面规则**，不得推断正向偏好，防止信息茧房；版本号+1），写回 `preferences.json`。
 - **规则重训（防漂移）**：标记积累超阈值（默认 200 条）或用户手动触发（设置页「立即重新学习」）时，从 `history.jsonl` 抽样重写规则，同样仅限负面规则。
 
-### 7.4 持久化文件（livefeed 配置目录下）
+### 7.4 持久化文件（dsh-livefeed 配置目录下）
 
 | 文件 | 说明 |
 | --- | --- |

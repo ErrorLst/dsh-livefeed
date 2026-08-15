@@ -18,4 +18,4 @@ Thumbs.db
 
 # ── 运行时数据（不入库）──
 runtime/
-.dsh/livefeed/
+.dsh/dsh-livefeed/

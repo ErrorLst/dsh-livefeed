@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * LiveFeed Client 半 —— cordis_define(code.client) 的函数体
+ * dsh-livefeed Client 半 —— cordis_define(code.client) 的函数体
  * ═══════════════════════════════════════════════════════════════════════════
  * 实现状态：骨架。待 HTML 原型评审通过后，按 docs/design.md 第 8 节与
  * prototype/prototype.html 的视觉规范完成（全部颜色使用 --dsw-alias-* 令牌）。
@@ -18,22 +18,22 @@ return {
     // ══ 面板组件 ══
     function LiveFeedPanel(props) {
       // TODO(评审后)：
-      //  - 挂载时 host.call('livefeed/cards') 拉取，之后每 15s 轮询（ctx.interval）
+      //  - 挂载时 host.call('dsh-livefeed/cards') 拉取，之后每 15s 轮询（ctx.interval）
       //  - 状态：{cards, status}；折叠态与设置视图开关存 React state（页面级）
       //  - 头部：标题「实时讯息」+ 设置(齿轮) + 立即刷新 + 折叠按钮
       //  - 设置视图（对应原型「面板设置」）：模型选择（provider/model/effort 级联，
-      //    数据来自 host.call('livefeed/model-catalog')，保存 host.call('livefeed/update-settings')）、
+      //    数据来自 host.call('dsh-livefeed/model-catalog')，保存 host.call('dsh-livefeed/update-settings')）、
       //    刷新间隔（分钟）、搜索源开关列表
       //  - 卡片：<a href={card.url} target="_blank" rel="noreferrer">
       //      title(2行截断) + summary(3行截断) + 源标签 + 时间 + isNew 徽标
       //  - 空态/加载态/错误态/折叠浮动按钮（对应 prototype 的预览状态）
-      return React.createElement('div', { 'data-livefeed': 'panel' }, 'LiveFeed Panel');
+      return React.createElement('div', { 'data-dsh-livefeed': 'panel' }, 'LiveFeed Panel');
     }
 
     // ══ 注册悬浮面板（root 作用域，任意页面可见）══
     slots.inject('shell.overlay', () =>
       slots.register(
-        { name: 'shell.overlay', id: 'livefeed.panel', order: 100 },
+        { name: 'shell.overlay', id: 'dsh-livefeed.panel', order: 100 },
         (props) => React.createElement(LiveFeedPanel, props)
       )
     );
