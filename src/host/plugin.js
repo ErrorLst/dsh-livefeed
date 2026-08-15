@@ -1,4 +1,4 @@
-﻿/* ═══════════════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════════════════
  * dsh-livefeed Host 半 —— cordis_define(code.host) 的函数体（完整实现 v1）
  * ═══════════════════════════════════════════════════════════════════════════
  * 约定：
@@ -29,7 +29,7 @@ return {
     const RETRY_BASE_MS = 5 * 60 * 1000;
     const TICK_MS = 30 * 1000; // 调度器基础节拍（实际周期由 config.intervalMinutes 决定）
 
-    // ══ 内置基类模板（base64，来自 src/template/template.js；与运行目录 sources/_template.js 二选一，文件优先）══
+    // ══ 基类模板 ══
     // 基类模板：以运行目录 sources/_template.js 为主要来源（项目初始化时已就位）。
     // 如需内置常量兜底：将 src/template/template.js 的内容 btoa 后内联到此处。
     const BUILTIN_TEMPLATE = '';
@@ -81,6 +81,15 @@ return {
       } catch (_) {
         return fallback;
       }
+    }
+    // RPC 返回必须是无损 JSON：递归把 undefined 归一为 null（Date 等非常规对象不会出现在载荷中）
+    function jsonSafe(v) {
+      if (v === undefined) return null;
+      if (v === null || typeof v !== 'object') return v;
+      if (Array.isArray(v)) return v.map(jsonSafe);
+      const out = {};
+      for (const k of Object.keys(v)) out[k] = jsonSafe(v[k]);
+      return out;
     }
 
     // ══ 默认值 ══
@@ -610,7 +619,7 @@ return {
     }
 
     // ══ RPC（Package 私有，Client→Host）══
-    harness.handle('dsh-livefeed/cards', async () => ({
+    harness.handle('dsh-livefeed/cards', async () => jsonSafe({
       cards: state.cards.slice(-300).map((c) => ({
         id: c.id, title: c.title, summary: c.summary, url: c.url,
         sourceName: c.sourceName, publishedAt: c.publishedAt,
@@ -629,7 +638,7 @@ return {
       },
     }));
 
-    harness.handle('dsh-livefeed/config', async () => ({
+    harness.handle('dsh-livefeed/config', async () => jsonSafe({
       config: state.config ? {
         intervalMinutes: state.config.intervalMinutes,
         maxCards: state.config.maxCards,
@@ -736,7 +745,7 @@ return {
       return { providers };
     });
 
-    harness.handle('dsh-livefeed/rules', async () => ({ rules: state.preferences }));
+    harness.handle('dsh-livefeed/rules', async () => jsonSafe({ rules: state.preferences }));
 
     harness.handle('dsh-livefeed/rerun-rules', async () => {
       if (state.running) return { accepted: false };
