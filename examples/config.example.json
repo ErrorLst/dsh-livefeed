@@ -1,0 +1,31 @@
+{
+  "intervalMinutes": 10,
+  "maxCards": 8,
+  "maxCandidatesPerSource": 5,
+  "summaryLanguage": "zh-CN",
+  "interests": ["AI Agent", "DeepSeek", "编程工具"],
+  "model": null,
+  "sources": [
+    {
+      "id": "search-ai",
+      "name": "AI 资讯搜索",
+      "script": "sources/search-ai.js",
+      "query": "AI agent 最新进展",
+      "enabled": true
+    },
+    {
+      "id": "hn",
+      "name": "Hacker News",
+      "script": "sources/hn.js",
+      "query": "AI",
+      "enabled": true
+    },
+    {
+      "id": "linuxdo",
+      "name": "Linux.do",
+      "script": "sources/linuxdo.js",
+      "query": "AI",
+      "enabled": true
+    }
+  ]
+}

@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LiveFeed 面板原型 · DSH 主题</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   DSH 设计平台令牌（取自 dsh-client-ui-theme/lib/styles/design-platform.css）
+   原型内嵌明暗两套值以便独立预览；真实插件直接使用 var(--dsw-alias-*)，
+   由宿主应用注入并随主题自动切换 —— 原型与插件代码共用同一套变量。
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --dsw-static-amber-100: rgb(254, 245, 231); --dsw-static-amber-400: rgb(247, 173, 49);
+  --dsw-static-amber-500: rgb(245, 158, 11);  --dsw-static-amber-600: rgb(221, 134, 41);
+  --dsw-static-amber-900: rgb(39, 36, 31);
+  --dsw-static-blue-100: rgb(219, 234, 254);  --dsw-static-blue-300: rgb(147, 197, 253);
+  --dsw-static-blue-400: rgb(96, 165, 250);   --dsw-static-blue-450: rgb(77, 147, 248);
+  --dsw-static-blue-500: rgb(59, 130, 246);   --dsw-static-blue-50: rgb(239, 246, 255);
+  --dsw-static-blue-50p: rgb(234, 243, 255);  --dsw-static-blue-600: rgb(37, 99, 235);
+  --dsw-static-blue-75: rgb(229, 240, 255);   --dsw-static-blue-800: rgb(30, 64, 175);
+  --dsw-static-blue-900: rgb(14, 48, 116);    --dsw-static-blue-950: rgb(23, 37, 84);
+  --dsw-static-deepseek-100: rgb(228, 237, 253); --dsw-static-deepseek-200: rgb(211, 226, 255);
+  --dsw-static-deepseek-300: rgb(183, 200, 254); --dsw-static-deepseek-400: rgb(103, 158, 254);
+  --dsw-static-deepseek-450: rgb(86, 134, 254);  --dsw-static-deepseek-500: rgb(65, 118, 230);
+  --dsw-static-deepseek-50: rgb(237, 243, 254);  --dsw-static-deepseek-600: rgb(72, 104, 178);
+  --dsw-static-deepseek-700-delete: rgb(47, 76, 143); --dsw-static-deepseek-800: rgb(52, 65, 91);
+  --dsw-static-deepseek-900: rgb(40, 49, 66);
+  --dsw-static-green-100: rgb(230, 250, 237);  --dsw-static-green-400: rgb(78, 209, 126);
+  --dsw-static-green-500: rgb(34, 197, 94);    --dsw-static-green-900: rgb(35, 60, 44);
+  --dsw-static-neutral-00: rgb(255, 255, 255); --dsw-static-neutral-1000: rgb(0, 0, 0);
+  --dsw-static-neutral-100: rgb(245, 245, 245); --dsw-static-neutral-150: rgb(237, 237, 237);
+  --dsw-static-neutral-200: rgb(229, 229, 229); --dsw-static-neutral-250: rgb(220, 220, 220);
+  --dsw-static-neutral-300: rgb(212, 212, 212); --dsw-static-neutral-400: rgb(162, 164, 166);
+  --dsw-static-neutral-500: rgb(127, 130, 135); --dsw-static-neutral-50: rgb(250, 250, 250);
+  --dsw-static-neutral-550: rgb(101, 103, 107); --dsw-static-neutral-600: rgb(84, 85, 87);
+  --dsw-static-neutral-700: rgb(60, 60, 61);   --dsw-static-neutral-800: rgb(41, 41, 41);
+  --dsw-static-neutral-850: rgb(33, 33, 35);   --dsw-static-neutral-900: rgb(15, 15, 15);
+  --dsw-static-neutral-bluish-00: rgb(255, 255, 255); --dsw-static-neutral-bluish-1000: rgb(15, 17, 21);
+  --dsw-static-neutral-bluish-100: rgb(235, 238, 242); --dsw-static-neutral-bluish-150: rgb(233, 236, 242);
+  --dsw-static-neutral-bluish-200: rgb(225, 229, 238); --dsw-static-neutral-bluish-300: rgb(207, 211, 214);
+  --dsw-static-neutral-bluish-400: rgb(173, 178, 184); --dsw-static-neutral-bluish-500: rgb(151, 157, 166);
+  --dsw-static-neutral-bluish-50: rgb(249, 250, 251);  --dsw-static-neutral-bluish-600: rgb(129, 133, 140);
+  --dsw-static-neutral-bluish-60: rgb(245, 246, 247);  --dsw-static-neutral-bluish-700: rgb(97, 102, 107);
+  --dsw-static-neutral-bluish-750: rgb(67, 69, 74);    --dsw-static-neutral-bluish-75: rgb(241, 243, 245);
+  --dsw-static-neutral-bluish-800: rgb(53, 54, 56);    --dsw-static-neutral-bluish-850: rgb(44, 44, 46);
+  --dsw-static-neutral-bluish-875: rgb(35, 35, 36);    --dsw-static-neutral-bluish-900: rgb(27, 27, 28);
+  --dsw-static-neutral-bluish-950: rgb(21, 21, 23);
+  --dsw-static-red-100: rgb(254, 226, 226); --dsw-static-red-400: rgb(242, 90, 90);
+  --dsw-static-red-500: rgb(239, 68, 68);   --dsw-static-red-50: rgb(254, 242, 242);
+  --dsw-static-red-600: rgb(236, 19, 19);   --dsw-static-red-900: rgb(87, 12, 12);
+}
+body[data-ds-dark-theme] {
+  /* 暗色仅 neutral-bluish-60 与亮色不同，其余静态值与亮色一致，此处按需覆盖 */
+  --dsw-static-neutral-bluish-60: rgb(249, 250, 251);
+}
+body {
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-mask-1: rgba(0, 0, 0, 0.24);
+  --dsw-alias-bg-mask-2: rgba(0, 0, 0, 0.12);
+  --dsw-alias-bg-mask-3: rgba(0, 0, 0, 0.48);
+  --dsw-alias-bg-mask-drop: rgba(255, 255, 255, 0.7);
+  --dsw-alias-bg-module-platform: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-bg-multi-select: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-bg-overlay: var(--dsw-static-neutral-bluish-150);
+  --dsw-alias-bg-skeleton: rgba(0, 0, 0, 0.04);
+  --dsw-alias-border-inverted2: rgba(0, 0, 0, 0);
+  --dsw-alias-border-inverted: rgba(0, 0, 0, 0);
+  --dsw-alias-border-l1: rgba(0, 0, 0, 0.04);
+  --dsw-alias-border-l2-darkmode-thin: rgba(0, 0, 0, 0.1);
+  --dsw-alias-border-l2: rgba(0, 0, 0, 0.1);
+  --dsw-alias-border-l3: rgba(0, 0, 0, 0.12);
+  --dsw-alias-border-l4: rgba(0, 0, 0, 0.16);
+  --dsw-alias-brand-primary-invert: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-brand-primary-new-colorprimary-new-color: rgb(65, 118, 230);
+  --dsw-alias-brand-primary: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-brand-text: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-button-contrast-fill: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-button-elevated-fill: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-button-floating-fill: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-button-floating-hover: var(--dsw-static-neutral-bluish-75);
+  --dsw-alias-button-ghost-active-border: var(--dsw-static-neutral-bluish-500);
+  --dsw-alias-button-ghost-active-fill: var(--dsw-static-neutral-bluish-100);
+  --dsw-alias-button-ghost-active-hover: var(--dsw-static-neutral-bluish-150);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-500);
+  --dsw-alias-button-info-hover: var(--dsw-static-deepseek-400);
+  --dsw-alias-button-primary-dimmed: var(--dsw-static-neutral-bluish-100);
+  --dsw-alias-button-primary-fill: var(--dsw-alias-brand-primary);
+  --dsw-alias-button-primary-hover: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-button-tool-bar-fill-invisible: rgba(31, 31, 31, 0.36);
+  --dsw-alias-button-tool-bar-fill: rgba(84, 85, 87, 0.5);
+  --dsw-alias-button-tool-bar-hover: rgba(84, 85, 87, 0.6);
+  --dsw-alias-interactive-bg-active: rgba(38, 49, 72, 0.1);
+  --dsw-alias-interactive-bg-hover-accent: rgba(38, 49, 72, 0.14);
+  --dsw-alias-interactive-bg-hover-danger: rgba(236, 19, 19, 0.05);
+  --dsw-alias-interactive-bg-hover-solid: var(--dsw-static-neutral-bluish-75);
+  --dsw-alias-interactive-bg-hover: rgba(38, 49, 72, 0.06);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-200);
+  --dsw-alias-label-primary-bluish: var(--dsw-static-blue-900);
+  --dsw-alias-label-primary-dimmed: var(--dsw-static-neutral-bluish-950);
+  --dsw-alias-label-primary-foreground: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-label-primary-inverted: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-markdown-citation: var(--dsw-static-neutral-bluish-100);
+  --dsw-alias-markdown-code-block-banner: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-markdown-code-block: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-markdown-code-segment-selected: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-markdown-code-segment-unselected: var(--dsw-static-neutral-bluish-75);
+  --dsw-alias-markdown-inline-code: var(--dsw-static-neutral-bluish-100);
+  --dsw-alias-markdown-placeholder: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-markdown-tag: var(--dsw-static-neutral-bluish-75);
+  --dsw-alias-scrollbar-bg-l1: var(--dsw-static-neutral-200);
+  --dsw-alias-scrollbar-bg-l2: var(--dsw-static-neutral-200);
+  --dsw-alias-scrollbar-hover-l1: var(--dsw-static-neutral-300);
+  --dsw-alias-scrollbar-hover-l2: var(--dsw-static-neutral-300);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-500);
+  --dsw-alias-state-business-tertiary: var(--dsw-static-deepseek-100);
+  --dsw-alias-state-error-primary: var(--dsw-static-red-600);
+  --dsw-alias-state-error-secondary: var(--dsw-static-red-400);
+  --dsw-alias-state-success-primary: var(--dsw-static-green-500);
+  --dsw-alias-state-success-secondary: var(--dsw-static-green-400);
+  --dsw-alias-state-success-tertiary: var(--dsw-static-green-100);
+  --dsw-alias-state-warn-label: var(--dsw-static-amber-600);
+  --dsw-alias-state-warn-primary: var(--dsw-static-amber-500);
+  --dsw-alias-state-warn-secondary: var(--dsw-static-amber-400);
+  --dsw-alias-state-warn-tertiary: var(--dsw-static-amber-100);
+  --dsw-alias-toast-bg: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-tooltip-bg: var(--dsw-static-neutral-bluish-850);
+  --dsw-specific-bubble-highlight: var(--dsw-static-deepseek-200);
+  --dsw-specific-bubble: var(--dsw-static-deepseek-50);
+  --dsw-specific-input-major: var(--dsw-static-neutral-bluish-00);
+  --dsw-specific-login-input: var(--dsw-static-neutral-bluish-50);
+  --dsw-specific-menu: var(--dsw-alias-bg-layer-3);
+  --dsw-specific-selector: var(--dsw-static-neutral-bluish-60);
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-50);
+  --dsw-specific-sidebar-nav-item-active-accent: var(--dsw-static-deepseek-100);
+  --dsw-specific-sidebar-nav-item-active: var(--dsw-static-neutral-bluish-100);
+  --dsw-specific-sidebar-nav-item-hover: var(--dsw-static-neutral-bluish-75);
+  --dsw-specific-tip: var(--dsw-static-neutral-bluish-60);
+}
+body[data-ds-dark-theme] {
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-950);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-875);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-bg-mask-1: rgba(0, 0, 0, 0.5);
+  --dsw-alias-bg-mask-2: rgba(0, 0, 0, 0.2);
+  --dsw-alias-bg-mask-3: rgba(0, 0, 0, 0.48);
+  --dsw-alias-bg-mask-drop: rgba(39, 39, 48, 0.7);
+  --dsw-alias-bg-module-platform: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-bg-multi-select: var(--dsw-static-neutral-850);
+  --dsw-alias-bg-overlay: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-bg-skeleton: rgba(255, 255, 255, 0.08);
+  --dsw-alias-border-inverted2: rgba(255, 255, 255, 0.08);
+  --dsw-alias-border-inverted: rgba(255, 255, 255, 0.06);
+  --dsw-alias-border-l1: rgba(255, 255, 255, 0.06);
+  --dsw-alias-border-l2-darkmode-thin: rgba(255, 255, 255, 0.06);
+  --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
+  --dsw-alias-border-l3: rgba(255, 255, 255, 0.16);
+  --dsw-alias-border-l4: rgba(255, 255, 255, 0.2);
+  --dsw-alias-brand-primary-invert: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-brand-primary-new-colorprimary-new-color: var(--dsw-static-deepseek-450);
+  --dsw-alias-brand-primary: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-brand-text: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-button-contrast-fill: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-button-elevated-fill: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-button-floating-fill: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-button-floating-hover: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-button-ghost-active-border: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-button-ghost-active-fill: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-button-ghost-active-hover: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-400);
+  --dsw-alias-button-info-hover: var(--dsw-static-deepseek-500);
+  --dsw-alias-button-primary-dimmed: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-button-primary-fill: var(--dsw-alias-brand-primary);
+  --dsw-alias-button-primary-hover: var(--dsw-static-neutral-bluish-100);
+  --dsw-alias-button-tool-bar-fill-invisible: rgba(31, 31, 31, 0.36);
+  --dsw-alias-button-tool-bar-fill: rgba(84, 85, 87, 0.5);
+  --dsw-alias-button-tool-bar-hover: rgba(84, 85, 87, 0.6);
+  --dsw-alias-interactive-bg-active: rgba(255, 255, 255, 0.14);
+  --dsw-alias-interactive-bg-hover-accent: rgba(255, 255, 255, 0.24);
+  --dsw-alias-interactive-bg-hover-danger: rgba(242, 90, 90, 0.15);
+  --dsw-alias-interactive-bg-hover-solid: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-interactive-bg-hover: rgba(255, 255, 255, 0.08);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-label-primary-bluish: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-label-primary-dimmed: var(--dsw-static-neutral-bluish-100);
+  --dsw-alias-label-primary-foreground: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-primary-inverted: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-markdown-citation: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-markdown-code-block-banner: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-markdown-code-block: var(--dsw-static-neutral-bluish-900);
+  --dsw-alias-markdown-code-segment-selected: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-markdown-code-segment-unselected: var(--dsw-static-neutral-bluish-900);
+  --dsw-alias-markdown-inline-code: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-markdown-placeholder: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-markdown-tag: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-scrollbar-bg-l1: var(--dsw-static-neutral-700);
+  --dsw-alias-scrollbar-bg-l2: var(--dsw-static-neutral-600);
+  --dsw-alias-scrollbar-hover-l1: var(--dsw-static-neutral-600);
+  --dsw-alias-scrollbar-hover-l2: var(--dsw-static-neutral-550);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-400);
+  --dsw-alias-state-business-tertiary: var(--dsw-static-deepseek-800);
+  --dsw-alias-state-error-primary: var(--dsw-static-red-400);
+  --dsw-alias-state-error-secondary: var(--dsw-static-red-400);
+  --dsw-alias-state-success-primary: var(--dsw-static-green-500);
+  --dsw-alias-state-success-secondary: var(--dsw-static-green-400);
+  --dsw-alias-state-success-tertiary: var(--dsw-static-green-900);
+  --dsw-alias-state-warn-label: var(--dsw-static-amber-600);
+  --dsw-alias-state-warn-primary: var(--dsw-static-amber-500);
+  --dsw-alias-state-warn-secondary: var(--dsw-static-amber-400);
+  --dsw-alias-state-warn-tertiary: var(--dsw-static-amber-900);
+  --dsw-alias-toast-bg: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-tooltip-bg: var(--dsw-static-neutral-bluish-750);
+  --dsw-specific-bubble-highlight: var(--dsw-static-neutral-bluish-750);
+  --dsw-specific-bubble: var(--dsw-static-neutral-bluish-850);
+  --dsw-specific-input-major: var(--dsw-static-neutral-bluish-850);
+  --dsw-specific-login-input: var(--dsw-static-neutral-bluish-900);
+  --dsw-specific-menu: var(--dsw-alias-bg-layer-3);
+  --dsw-specific-selector: var(--dsw-static-neutral-bluish-800);
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-900);
+  --dsw-specific-sidebar-nav-item-active-accent: var(--dsw-static-neutral-bluish-800);
+  --dsw-specific-sidebar-nav-item-active: var(--dsw-static-neutral-bluish-750);
+  --dsw-specific-sidebar-nav-item-hover: var(--dsw-static-neutral-bluish-850);
+  --dsw-specific-tip: var(--dsw-static-neutral-bluish-800);
+}
+
+/* ═══════════════ 页面基础 ═══════════════ */
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ═══════════════ 应用仿真（仅原型用于衬托面板位置）═══════════════ */
+.app { display: flex; height: 100vh; }
+.app-sidebar {
+  width: 232px; flex: none;
+  background: var(--dsw-specific-sidebar-fill);
+  border-right: 1px solid var(--dsw-alias-border-l1);
+  padding: 12px 10px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.app-sidebar .sb-brand { font-size: 12px; font-weight: 600; letter-spacing: .06em; color: var(--dsw-alias-label-secondary); padding: 4px 8px 10px; }
+.app-sidebar .sb-item {
+  padding: 7px 8px; border-radius: 6px; font-size: 12px;
+  color: var(--dsw-alias-label-secondary); cursor: default;
+}
+.app-sidebar .sb-item.active { background: var(--dsw-specific-sidebar-nav-item-active); color: var(--dsw-alias-label-primary); }
+.app-main { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.app-hero { width: 100%; max-width: 560px; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
+.app-hero .hero-chip {
+  font-size: 11px; color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-specific-bubble); padding: 3px 10px; border-radius: 999px;
+}
+.app-hero h1 { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: .02em; }
+.app-hero p { margin: 0; font-size: 13px; color: var(--dsw-alias-label-tertiary); }
+.app-hero .hero-input {
+  width: 100%; height: 42px; margin-top: 6px;
+  background: var(--dsw-specific-input-major);
+  border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px;
+  display: flex; align-items: center; padding: 0 14px;
+  color: var(--dsw-alias-label-tertiary); font-size: 13px;
+}
+
+/* ═══════════════ LiveFeed 悬浮面板 ═══════════════ */
+.lf-panel {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 340px;
+  display: flex; flex-direction: column;
+  background: var(--dsw-alias-bg-layer-1);
+  border-left: 1px solid var(--dsw-alias-border-l1);
+  box-shadow: -8px 0 24px var(--dsw-alias-bg-mask-2);
+  z-index: 100;
+  transition: transform .18s ease;
+}
+.lf-panel.hidden { transform: translateX(105%); pointer-events: none; }
+
+/* 头部 */
+.lf-header {
+  flex: none; height: 48px; padding: 0 10px 0 14px;
+  display: flex; align-items: center; gap: 6px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+.lf-header .lf-title { flex: 1; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 7px; min-width: 0; }
+.lf-header .lf-title .lf-logo {
+  width: 16px; height: 16px; flex: none; border-radius: 5px;
+  background: var(--dsw-alias-state-business-primary);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--dsw-alias-label-primary-foreground);
+}
+.lf-header .lf-title .lf-logo svg { width: 10px; height: 10px; }
+.lf-iconbtn {
+  width: 26px; height: 26px; flex: none; border: none; border-radius: 6px;
+  background: transparent; color: var(--dsw-alias-label-secondary);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: background .12s, color .12s;
+}
+.lf-iconbtn:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.lf-iconbtn:active { background: var(--dsw-alias-interactive-bg-active); }
+.lf-iconbtn svg { width: 14px; height: 14px; }
+.lf-iconbtn.spin svg { animation: lf-spin .8s linear infinite; }
+@keyframes lf-spin { to { transform: rotate(360deg); } }
+
+/* 状态行 */
+.lf-status {
+  flex: none; display: flex; align-items: center; gap: 6px;
+  padding: 6px 14px; font-size: 11px; color: var(--dsw-alias-label-tertiary);
+  border-bottom: 1px solid var(--dsw-alias-border-l1); white-space: nowrap;
+}
+.lf-status .lf-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--dsw-alias-state-success-primary); }
+.lf-status[data-phase="running"] .lf-dot { background: var(--dsw-alias-state-business-primary); animation: lf-pulse 1.2s ease-in-out infinite; }
+.lf-status[data-phase="error"] .lf-dot { background: var(--dsw-alias-state-error-primary); }
+.lf-status[data-phase="error"] { color: var(--dsw-alias-state-error-primary); }
+@keyframes lf-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+.lf-status .lf-status-text { overflow: hidden; text-overflow: ellipsis; }
+
+/* 列表 */
+.lf-scroll { flex: 1; overflow-y: auto; padding: 8px; }
+.lf-scroll::-webkit-scrollbar { width: 8px; }
+.lf-scroll::-webkit-scrollbar-thumb { background: var(--dsw-alias-scrollbar-bg-l1); border-radius: 4px; }
+.lf-scroll::-webkit-scrollbar-thumb:hover { background: var(--dsw-alias-scrollbar-hover-l1); }
+
+/* 错误横幅 */
+.lf-error {
+  margin: 8px 8px 0; padding: 8px 10px; border-radius: 8px;
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+  color: var(--dsw-alias-state-error-primary); font-size: 11px;
+  line-height: 1.5; display: flex; flex-direction: column; gap: 2px;
+}
+
+/* 卡片 */
+.lf-card {
+  display: block; text-decoration: none; color: inherit;
+  padding: 10px 12px; border-radius: 8px;
+  border: 1px solid transparent;
+  transition: background .12s, border-color .12s;
+}
+.lf-card:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.lf-card-title-row { display: flex; align-items: flex-start; gap: 6px; }
+.lf-card-title {
+  flex: 1; font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  word-break: break-word;
+}
+.lf-badge {
+  flex: none; margin-top: 1px; font-size: 10px; line-height: 1.4; font-weight: 600;
+  padding: 1px 6px; border-radius: 999px;
+  background: var(--dsw-alias-state-success-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+}
+.lf-card-summary {
+  margin-top: 4px; font-size: 12px; color: var(--dsw-alias-label-secondary);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  word-break: break-word;
+}
+.lf-card-meta { margin-top: 8px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+.lf-source-tag {
+  font-size: 10px; padding: 1px 6px; border-radius: 4px;
+  background: var(--dsw-specific-bubble); color: var(--dsw-alias-state-business-primary);
+}
+.lf-card-time { white-space: nowrap; }
+.lf-card-time + .lf-card-time { margin-left: auto; }
+
+/* 骨架（加载态） */
+.lf-skeleton { padding: 10px 12px; }
+.lf-skeleton .sk { background: var(--dsw-alias-bg-skeleton); border-radius: 6px; margin-bottom: 8px; }
+.lf-skeleton .sk.line { height: 12px; }
+.lf-skeleton .sk.line.w70 { width: 70%; }
+
+/* 空态 */
+.lf-empty {
+  height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 24px; text-align: center;
+}
+.lf-empty .lf-empty-icon {
+  width: 40px; height: 40px; border-radius: 50%;
+  background: var(--dsw-alias-interactive-bg-hover);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--dsw-alias-label-tertiary);
+}
+.lf-empty .lf-empty-icon svg { width: 18px; height: 18px; }
+.lf-empty p { margin: 0; font-size: 12px; color: var(--dsw-alias-label-secondary); }
+.lf-empty .lf-empty-sub { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+.lf-ghostbtn {
+  margin-top: 4px; height: 28px; padding: 0 14px; border-radius: 7px;
+  border: 1px solid var(--dsw-alias-border-l2); background: transparent;
+  color: var(--dsw-alias-label-primary); font-size: 12px; cursor: pointer;
+  transition: background .12s;
+}
+.lf-ghostbtn:hover { background: var(--dsw-alias-interactive-bg-hover); }
+
+/* 折叠窄条 */
+.lf-rail {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 30px;
+  background: var(--dsw-alias-bg-layer-1);
+  border-left: 1px solid var(--dsw-alias-border-l1);
+  box-shadow: -8px 0 24px var(--dsw-alias-bg-mask-2);
+  display: none; flex-direction: column; align-items: center; padding-top: 12px;
+  z-index: 100;
+}
+.lf-rail.visible { display: flex; }
+.lf-rail .lf-iconbtn { margin-bottom: 10px; }
+.lf-rail .lf-rail-title {
+  writing-mode: vertical-rl; font-size: 11px; color: var(--dsw-alias-label-tertiary);
+  letter-spacing: .2em; user-select: none;
+}
+
+/* ═══════════════ 原型调试工具条（仅原型内使用）═══════════════ */
+.proto-bar {
+  position: fixed; left: 12px; bottom: 12px; z-index: 9999;
+  background: var(--dsw-alias-bg-overlay);
+  border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px;
+  padding: 10px 12px; font-size: 12px;
+  display: flex; flex-direction: column; gap: 8px;
+  box-shadow: 0 8px 24px var(--dsw-alias-bg-mask-2);
+  max-width: 300px;
+}
+.proto-bar .pb-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.proto-bar .pb-label { color: var(--dsw-alias-label-tertiary); font-size: 11px; }
+.proto-bar button {
+  height: 24px; padding: 0 10px; font-size: 11px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--dsw-alias-border-l2); background: transparent;
+  color: var(--dsw-alias-label-secondary); transition: background .12s, color .12s;
+}
+.proto-bar button:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.proto-bar button.on { background: var(--dsw-alias-button-primary-fill); border-color: transparent; color: var(--dsw-alias-label-primary-foreground); }
+.proto-bar .pb-note { font-size: 10px; color: var(--dsw-alias-label-tertiary); line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<!-- ══ 应用仿真背景 ══ -->
+<div class="app">
+  <div class="app-sidebar">
+    <div class="sb-brand">deepseek HARNESS</div>
+    <div class="sb-item active">dsh-workspace</div>
+    <div class="sb-item">LaptopAxisCheck</div>
+    <div class="sb-item">未分组</div>
+  </div>
+  <div class="app-main">
+    <div class="app-hero">
+      <div class="hero-chip">dsh-workspace · 创造模式</div>
+      <h1>探索未至之境</h1>
+      <p>描述你想要构建的内容</p>
+      <div class="hero-input">输入消息，@ 引用插件或选择模式…</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ LiveFeed 面板 ══ -->
+<aside class="lf-panel" id="panel">
+  <!-- 头部 -->
+  <div class="lf-header">
+    <div class="lf-title">
+      <span class="lf-logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z" fill="currentColor"/></svg>
+      </span>
+      <span>实时讯息</span>
+    </div>
+    <button class="lf-iconbtn" id="btnRefresh" title="立即刷新" aria-label="立即刷新">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+    </button>
+    <button class="lf-iconbtn" id="btnCollapse" title="折叠面板" aria-label="折叠面板">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+    </button>
+  </div>
+
+  <!-- 状态行 -->
+  <div class="lf-status" id="status" data-phase="idle">
+    <span class="lf-dot"></span>
+    <span class="lf-status-text" id="statusText">上次刷新 12:34 · 3 个源正常</span>
+  </div>
+
+  <!-- 列表 -->
+  <div class="lf-scroll" id="scroll"></div>
+</aside>
+
+<!-- ══ 折叠窄条 ══ -->
+<div class="lf-rail" id="rail">
+  <button class="lf-iconbtn" id="btnExpand" title="展开面板" aria-label="展开面板">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+  </button>
+  <span class="lf-rail-title">实时讯息</span>
+</div>
+
+<!-- ══ 原型调试工具条 ══ -->
+<div class="proto-bar">
+  <div class="pb-row">
+    <span class="pb-label">主题</span>
+    <button id="btnTheme">切换到暗色</button>
+  </div>
+  <div class="pb-row">
+    <span class="pb-label">状态预览</span>
+    <button data-state="cards" class="on">卡片</button>
+    <button data-state="loading">刷新中</button>
+    <button data-state="error">源错误</button>
+    <button data-state="empty">空态</button>
+  </div>
+  <div class="pb-row">
+    <span class="pb-label">面板</span>
+    <button id="btnTogglePanel">折叠/展开</button>
+  </div>
+  <div class="pb-note">颜色全部取自 DSH design-platform.css 的 --dsw-alias-* / --dsw-static-* 令牌，明暗两套均已内嵌；真实插件直接引用 var()，随宿主主题自动切换。本工具条仅用于原型预览。</div>
+</div>
+
+<script>
+/* ══ 示例数据 ══ */
+const CARDS = [
+  {
+    isNew: true,
+    title: 'DeepSeek 新版推理模型发布：上下文窗口提升至 1M，API 价格下调 40%',
+    summary: 'DeepSeek 今日发布新一代推理模型，宣称在代码与数学基准上显著领先，同时将 API 价格下调约 40%。官方博客提供了完整的模型卡与基准对比，业内普遍认为这将进一步压低长上下文任务的推理成本。',
+    source: 'AI 资讯搜索', time: '10 分钟前', url: '#',
+  },
+  {
+    isNew: false,
+    title: 'Show HN: 我构建了一个本地优先的 AI 笔记应用，支持全文检索与离线模型',
+    summary: '作者展示了一款完全本地运行的笔记应用：所有数据存于 SQLite，内置全文检索，并可通过 Ollama 接入离线模型做摘要与问答。评论区正在讨论隐私与检索质量之间的取舍。',
+    source: 'Hacker News', time: '1 小时前', url: '#',
+  },
+  {
+    isNew: false,
+    title: '【讨论】大家现在都用什么 Agent 框架搭自动化流程？分享你的踩坑经验',
+    summary: '楼主发起讨论：从 n8n、Dify 到自研 LLM 管线，哪种方案最适合个人自动化？回复中多次提到「先小范围验证再上框架」，也有不少关于模型调用成本与稳定性的经验分享。',
+    source: 'Linux.do', time: '2 小时前', url: '#',
+  },
+  {
+    isNew: false,
+    title: 'AI Agent 从原型到生产：一篇关于工具调用可靠性的深度分析',
+    summary: '文章分析了工具调用在真实业务中的失败模式：参数幻觉、重复调用与权限边界，并给出结构化输出、重试预算与人工兜底三条工程建议，值得正在做 Agent 落地的团队一读。',
+    source: 'AI 资讯搜索', time: '3 小时前', url: '#',
+  },
+];
+
+const SOURCE_ERRORS = [
+  { sourceId: 'linuxdo', message: '精搜失败：linux.do 返回 403（可能触发反爬），已降级为 snippet 摘要' },
+];
+
+/* ══ DOM ══ */
+const panel = document.getElementById('panel');
+const rail = document.getElementById('rail');
+const status = document.getElementById('status');
+const statusText = document.getElementById('statusText');
+const scroll = document.getElementById('scroll');
+const btnRefresh = document.getElementById('btnRefresh');
+const btnCollapse = document.getElementById('btnCollapse');
+const btnExpand = document.getElementById('btnExpand');
+const btnTheme = document.getElementById('btnTheme');
+
+let collapsed = false;
+let currentState = 'cards';
+
+function cardHtml(c) {
+  const badge = c.isNew ? '<span class="lf-badge">新</span>' : '';
+  return `<a class="lf-card" href="${c.url}" target="_blank" rel="noreferrer">
+    <div class="lf-card-title-row">
+      <span class="lf-card-title">${c.title}</span>${badge}
+    </div>
+    <div class="lf-card-summary">${c.summary}</div>
+    <div class="lf-card-meta">
+      <span class="lf-source-tag">${c.source}</span>
+      <span class="lf-card-time">${c.time}</span>
+      <span class="lf-card-time">打开原文 ↗</span>
+    </div>
+  </a>`;
+}
+
+function setPanelState(state) {
+  currentState = state;
+  document.querySelectorAll('.proto-bar button[data-state]').forEach((b) =>
+    b.classList.toggle('on', b.dataset.state === state));
+  status.dataset.phase = state === 'loading' ? 'running' : (state === 'error' ? 'error' : 'idle');
+
+  if (state === 'loading') {
+    statusText.textContent = '正在采集与整理…';
+    scroll.innerHTML =
+      `<div class="lf-skeleton"><div class="sk line"></div><div class="sk line w70"></div><div class="sk line"></div></div>` +
+      `<div class="lf-skeleton"><div class="sk line"></div><div class="sk line w70"></div></div>`;
+    return;
+  }
+  if (state === 'error') {
+    statusText.textContent = '部分源出错 · 上次刷新 12:34';
+    scroll.innerHTML =
+      `<div class="lf-error">${SOURCE_ERRORS.map((e) =>
+        `<div>${e.sourceId}：${e.message}</div>`).join('')}</div>` +
+      CARDS.slice(0, 2).map(cardHtml).join('');
+    return;
+  }
+  if (state === 'empty') {
+    statusText.textContent = '上次刷新 12:34 · 暂无匹配内容';
+    scroll.innerHTML = `<div class="lf-empty">
+      <div class="lf-empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z"/><path d="M19 15l.9 2.6L22.5 18.5l-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9L19 15z"/></svg></div>
+      <p>暂无匹配你兴趣的内容</p>
+      <p class="lf-empty-sub">可在 config.json 中调整兴趣词与搜索源</p>
+      <button class="lf-ghostbtn" id="emptyRefresh">立即刷新</button>
+    </div>`;
+    document.getElementById('emptyRefresh')?.addEventListener('click', simulateRefresh);
+    return;
+  }
+  // cards
+  statusText.textContent = '上次刷新 12:34 · 3 个源正常';
+  scroll.innerHTML = CARDS.map(cardHtml).join('');
+}
+
+function simulateRefresh() {
+  if (currentState === 'loading') return;
+  setPanelState('loading');
+  btnRefresh.classList.add('spin');
+  setTimeout(() => { btnRefresh.classList.remove('spin'); setPanelState('cards'); }, 1400);
+}
+
+function setCollapsed(value) {
+  collapsed = value;
+  panel.classList.toggle('hidden', value);
+  rail.classList.toggle('visible', value);
+}
+
+/* ══ 事件 ══ */
+btnRefresh.addEventListener('click', simulateRefresh);
+btnCollapse.addEventListener('click', () => setCollapsed(true));
+btnExpand.addEventListener('click', () => setCollapsed(false));
+document.getElementById('btnTogglePanel').addEventListener('click', () => setCollapsed(!collapsed));
+document.querySelectorAll('.proto-bar button[data-state]').forEach((b) =>
+  b.addEventListener('click', () => setPanelState(b.dataset.state)));
+btnTheme.addEventListener('click', () => {
+  const dark = document.body.toggleAttribute('data-ds-dark-theme');
+  btnTheme.textContent = dark ? '切换到亮色' : '切换到暗色';
+});
+
+/* ══ 初始 ══ */
+setPanelState('cards');
+</script>
+</body>
+</html>

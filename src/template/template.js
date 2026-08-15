@@ -1,0 +1,148 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+ * LiveFeed 搜索源基类模板（Base Template）
+ * ═══════════════════════════════════════════════════════════════════════════
+ * Host 将本模板与源脚本拼接（program = 模板 + "\n" + 源脚本）后，作为
+ * codeRuntime 的 program 运行。源脚本只需实现：
+ *
+ *   async function coarseSearch(api)   // 必选：粗搜，返回 [{title, url, snippet?, publishedAt?}]
+ *   async function fineSearch(api, item) // 可选：精搜，返回 { text }（默认实现见下）
+ *
+ * 模板在文件尾部注入调度器，依据 api.mode() 分派；归一化/截断/去重由模板统一完成。
+ * 源脚本请勿重新声明第 4 节保留名（见 docs/source-contract.md）。
+ * 本文件是 Host 内置模板常量的源头：修改后需同步到 Host 代码中的模板常量。
+ */
+'use strict';
+
+// ────────────────────────────────────────────────────────────────────────────
+// 常量
+// ────────────────────────────────────────────────────────────────────────────
+const MAX_CONTENT_CHARS = 8000;   // 精搜正文上限（字符）
+const DEFAULT_MAX_ITEMS = 15;     // 粗搜默认条目上限
+
+// ────────────────────────────────────────────────────────────────────────────
+// 子类契约：coarseSearch 必选，fineSearch 可选（有默认实现）
+// ────────────────────────────────────────────────────────────────────────────
+async function coarseSearch(api) {
+  throw new Error(
+    '[livefeed] 源脚本未实现 coarseSearch(api)：请返回 [{title, url, snippet?, publishedAt?}]'
+  );
+}
+
+async function fineSearch(api, item) {
+  // 默认精搜：抓取条目 URL 并提取正文（纯链接列表型源无需覆盖）
+  const page = await fetchPage(api, item.url);
+  return { text: htmlToText(page.body.content, MAX_CONTENT_CHARS) };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 公共工具（基类方法，源脚本可直接调用）
+// ────────────────────────────────────────────────────────────────────────────
+/** 包装 api.search，返回 sources[] */
+async function searchWeb(api, query, maxResults) {
+  const r = await api.search({
+    query: String(query),
+    maxResults: maxResults || DEFAULT_MAX_ITEMS,
+  });
+  return (r && Array.isArray(r.sources) ? r.sources : []);
+}
+
+/** 包装 api.fetchContent */
+async function fetchPage(api, url) {
+  return api.fetchContent({ url: String(url) });
+}
+
+/** HTML 实体解码（含 <br> 换行、去标签） */
+function decodeEntities(s) {
+  return String(s)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/gi, "'");
+}
+
+/** 通用 HTML→文本：去标签、压缩空白，可选截断 */
+function htmlToText(html, maxLen) {
+  let text = decodeEntities(html)
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  if (maxLen && text.length > maxLen) text = text.slice(0, maxLen) + '…';
+  return text;
+}
+
+/** 取值辅助（字符串键或函数） */
+function pick(obj, key) {
+  if (key === null || key === undefined) return '';
+  if (typeof key === 'function') return key(obj);
+  const v = obj[key];
+  return v === null || v === undefined ? '' : String(v);
+}
+
+/** 将 JSON API 列表规整为 items：{titleKey, urlKey, snippetKey?, publishedAtKey?, urlFallback?} */
+function jsonItems(list, opts) {
+  const o = opts || {};
+  return (Array.isArray(list) ? list : []).map((x) => ({
+    title: pick(x, o.titleKey),
+    url: pick(x, o.urlKey) || (typeof o.urlFallback === 'function' ? pick(x, o.urlFallback) : ''),
+    snippet: o.snippetKey ? pick(x, o.snippetKey) : '',
+    publishedAt: o.publishedAtKey ? pick(x, o.publishedAtKey) || undefined : undefined,
+  }));
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 归一化（模板内部）
+// ────────────────────────────────────────────────────────────────────────────
+function _normalizeTitles(items, cfg) {
+  if (!Array.isArray(items)) {
+    throw new Error('[livefeed] coarseSearch 必须返回数组');
+  }
+  const max = (cfg && cfg.maxItems) || DEFAULT_MAX_ITEMS;
+  const seen = new Set();
+  const out = [];
+  for (const it of items) {
+    if (!it || typeof it !== 'object') continue;
+    const url = String(it.url || '').trim();
+    const title = String(it.title || '').trim();
+    if (!url || !title || seen.has(url)) continue;
+    seen.add(url);
+    out.push({
+      title,
+      url,
+      snippet: it.snippet ? String(it.snippet).slice(0, 500) : '',
+      publishedAt: typeof it.publishedAt === 'string' ? it.publishedAt : undefined,
+    });
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+function _normalizeContent(out) {
+  if (!out || typeof out !== 'object') {
+    throw new Error('[livefeed] fineSearch 必须返回 { text }');
+  }
+  const text = String(out.text || '').trim();
+  if (!text) throw new Error('[livefeed] fineSearch 返回的正文为空');
+  return { text: text.slice(0, MAX_CONTENT_CHARS) };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 调度器（模板内置；源脚本无需关心）
+// ────────────────────────────────────────────────────────────────────────────
+async function _livefeedDispatcher() {
+  const mode = await api.mode();
+  if (mode === 'titles') {
+    return _normalizeTitles(await coarseSearch(api), await api.config());
+  }
+  if (mode === 'content') {
+    const item = await api.item();
+    return _normalizeContent(await fineSearch(api, item));
+  }
+  throw new Error('[livefeed] 未知模式: ' + String(mode));
+}
+
+return await _livefeedDispatcher();

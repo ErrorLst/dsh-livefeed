@@ -1,0 +1,21 @@
+# ── 依赖与构建 ──
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# ── 日志与临时文件 ──
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+*.tmp
+
+# ── 编辑器 ──
+.idea/
+.vscode/
+*.swp
+
+# ── 运行时数据（不入库）──
+runtime/
+.dsh/livefeed/
