@@ -93,6 +93,18 @@
 | --- | --- | --- |
 | `livefeed/cards` | — | `{ cards: [{id,title,summary,url,sourceName,publishedAt?,isNew}], status: {running, lastRunAt?, sourceErrors:[{sourceId,message}]} }` |
 | `livefeed/refresh` | — | `{ accepted: boolean }`（运行中则幂等拒绝） |
+| `livefeed/model-catalog` | — | `{ providers: [{id, name, models: [{id, name, efforts: [{id, name}]}]}] }`（面板「模型选择」级联数据源，来自 `llm.listProviders()/listModels()/resolveModelInfo()`） |
+| `livefeed/update-settings` | `{ intervalMinutes?, model?, sources?: [{id, enabled}] }` | `{ ok: boolean, error? }`（增量合并写回 `config.json`，下一周期生效） |
+
+### 6.1 面板设置
+
+头部齿轮按钮进入设置视图（见 [HTML 原型](../prototype/prototype.html)），包含三块：
+
+1. **模型选择**：提供商 → 模型 → 思考等级（reasoning effort）级联下拉；「跟随当前默认模型」开关对应 `config.model = null`（用 `agentDefaultModel.currentSelection()`）。级联数据来自 `livefeed/model-catalog`。
+2. **刷新间隔**：分钟数输入（1–1440），对应 `config.intervalMinutes`。
+3. **搜索源管理**：每个源一行 + 开关，对应 `sources[].enabled`；关闭的源在周期 0 装载阶段跳过。
+
+保存经 `livefeed/update-settings` 增量合并写回 `config.json`（`fs.writeText`），不覆盖脚本字段（`script/query` 等保留）。
 
 ## 7. 安全与隔离
 

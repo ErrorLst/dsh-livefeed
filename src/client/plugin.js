@@ -19,8 +19,11 @@ return {
     function LiveFeedPanel(props) {
       // TODO(评审后)：
       //  - 挂载时 host.call('livefeed/cards') 拉取，之后每 15s 轮询（ctx.interval）
-      //  - 状态：{cards, status}；折叠态存 React state（页面级）
-      //  - 头部：标题「实时讯息」+ 折叠按钮 + 立即刷新按钮 + 状态行
+      //  - 状态：{cards, status}；折叠态与设置视图开关存 React state（页面级）
+      //  - 头部：标题「实时讯息」+ 设置(齿轮) + 立即刷新 + 折叠按钮
+      //  - 设置视图（对应原型「面板设置」）：模型选择（provider/model/effort 级联，
+      //    数据来自 host.call('livefeed/model-catalog')，保存 host.call('livefeed/update-settings')）、
+      //    刷新间隔（分钟）、搜索源开关列表
       //  - 卡片：<a href={card.url} target="_blank" rel="noreferrer">
       //      title(2行截断) + summary(3行截断) + 源标签 + 时间 + isNew 徽标
       //  - 空态/加载态/错误态/折叠窄条（对应 prototype 的 4 种预览状态）
