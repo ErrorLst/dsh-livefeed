@@ -344,11 +344,21 @@ body {
   line-height: 1.5; display: flex; flex-direction: column; gap: 2px;
 }
 
-/* 分组标题 */
+/* 分组标题（可折叠） */
 .lf-group {
-  display: flex; align-items: baseline; justify-content: space-between;
-  padding: 8px 12px 2px; font-size: 11px; color: var(--dsw-alias-label-tertiary);
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 10px; margin: 2px 4px 0; border-radius: 6px;
+  font-size: 11px; color: var(--dsw-alias-label-tertiary);
+  cursor: pointer; user-select: none;
+  transition: background .12s;
 }
+.lf-group:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.lf-group .lf-group-chev {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; transition: transform .15s;
+}
+.lf-group.collapsed .lf-group-chev { transform: rotate(-90deg); }
+.lf-group .lf-group-label { flex: 1; }
 .lf-group .lf-group-count { font-size: 10px; }
 
 /* 卡片容器与左滑动作（左滑 = 标记不感兴趣，仅此一种反馈） */
@@ -360,6 +370,11 @@ body {
   font-size: 10px; font-weight: 600;
 }
 .lf-card-swipe svg { width: 14px; height: 14px; }
+/* 「移除不感兴趣」动作条（不感兴趣组内左滑） */
+.lf-card-swipe.remove {
+  background: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-primary-foreground);
+}
 .lf-card {
   display: block; text-decoration: none; color: inherit;
   padding: 10px 12px; border-radius: 8px;
@@ -772,12 +787,18 @@ function feedbackTag(c) {
 function cardHtml(c) {
   const badge = c.isNew && !c.read ? '<span class="lf-badge">新</span>' : '';
   const fb = feedbackTag(c);
-  return `<div class="lf-card-wrap" data-id="${c.id}">
-    <div class="lf-card-swipe">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/></svg>
-      <span>不感兴趣</span>
+  const isDislike = c.feedback === 'dislike';
+  // 不感兴趣组内左滑 = 移除标记；其他卡片左滑 = 标记不感兴趣
+  const stripLabel = isDislike ? '移除' : '不感兴趣';
+  const stripIcon = isDislike
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/></svg>';
+  return `<div class="lf-card-wrap" data-id="${c.id}" data-action="${isDislike ? 'remove' : 'dislike'}">
+    <div class="lf-card-swipe${isDislike ? ' remove' : ''}">
+      ${stripIcon}
+      <span>${stripLabel}</span>
     </div>
-    <a class="lf-card${c.read ? ' read' : ''}" href="${c.url}" target="_blank" rel="noreferrer" draggable="false">
+    <a class="lf-card${c.read ? ' read' : ''}${isDislike ? ' dislike' : ''}" href="${c.url}" target="_blank" rel="noreferrer" draggable="false">
       <div class="lf-card-title-row">
         <span class="lf-card-title">${c.title}</span>${badge}
       </div>
@@ -792,23 +813,48 @@ function cardHtml(c) {
   </div>`;
 }
 
-function groupHtml(label, count) {
-  return `<div class="lf-group"><span>${label}</span><span class="lf-group-count">${count}</span></div>`;
+/* 页面级：折叠状态的分组 key 集合 */
+const COLLAPSED_GROUPS = new Set();
+
+function groupHtml(key, label, count) {
+  const collapsed = COLLAPSED_GROUPS.has(key);
+  return `<div class="lf-group${collapsed ? ' collapsed' : ''}" data-group="${key}" title="折叠/展开">
+    <span class="lf-group-chev"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
+    <span class="lf-group-label">${label}</span>
+    <span class="lf-group-count">${count}</span>
+  </div>`;
 }
 
 function findCard(id) { return CARDS.find((c) => c.id === id); }
 
 function renderCards() {
-  // 三层分组：最新（本轮新到）→ 未读（之前）→ 已读
-  const latest = CARDS.filter((c) => !c.read && c.isNew);
-  const unread = CARDS.filter((c) => !c.read && !c.isNew);
-  const read = CARDS.filter((c) => c.read);
+  // 四层分组：最新（本轮新到）→ 未读（之前）→ 已读 → 不感兴趣
+  const groups = [
+    { key: 'latest', label: '最新', items: CARDS.filter((c) => !c.read && c.isNew) },
+    { key: 'unread', label: '未读', items: CARDS.filter((c) => !c.read && !c.isNew) },
+    { key: 'read', label: '已读', items: CARDS.filter((c) => c.read && c.feedback !== 'dislike') },
+    { key: 'dislike', label: '不感兴趣', items: CARDS.filter((c) => c.feedback === 'dislike') },
+  ];
   let html = '';
-  if (latest.length) html += groupHtml('最新', latest.length) + latest.map(cardHtml).join('');
-  if (unread.length) html += groupHtml('未读', unread.length) + unread.map(cardHtml).join('');
-  if (read.length) html += groupHtml('已读', read.length) + read.map(cardHtml).join('');
+  for (const g of groups) {
+    if (!g.items.length) continue;
+    html += groupHtml(g.key, g.label, g.items.length);
+    if (!COLLAPSED_GROUPS.has(g.key)) html += g.items.map(cardHtml).join('');
+  }
   scroll.innerHTML = html;
   bindCardInteractions();
+  bindGroupHeaders();
+}
+
+/* 分组折叠/展开 */
+function bindGroupHeaders() {
+  document.querySelectorAll('.lf-group').forEach((h) =>
+    h.addEventListener('click', () => {
+      const key = h.dataset.group;
+      if (COLLAPSED_GROUPS.has(key)) COLLAPSED_GROUPS.delete(key);
+      else COLLAPSED_GROUPS.add(key);
+      renderCards();
+    }));
 }
 
 /* 点击打开原文后自动标为已读（原型内模拟打开动作） */
@@ -846,7 +892,8 @@ function bindCardInteractions() {
     }
 
     card.addEventListener('pointerdown', (e) => {
-      if (card.classList.contains('read')) return; // 已读卡片不可再滑
+      // 普通已读卡片不可滑；「不感兴趣」卡片可滑（左滑 = 移除标记）
+      if (card.classList.contains('read') && !card.classList.contains('dislike')) return;
       if (e.button !== 0) return; // 仅响应左键
       startX = e.clientX; startY = e.clientY;
       dx = 0; moved = false; dragging = false;
@@ -875,8 +922,10 @@ function bindCardInteractions() {
         const out = dx <= -60;
         resetDrag();
         if (out) {
+          // remove = 移除「不感兴趣」标记（回到已读）；dislike = 标记不感兴趣
+          const action = wrap.dataset.action === 'remove' ? null : 'dislike';
           card.classList.add('swiped');
-          setTimeout(() => setFeedback(id, 'dislike'), 200); // 滑出动画完成后落库
+          setTimeout(() => setFeedback(id, action), 200); // 滑出动画完成后落库
         }
       }
     });
