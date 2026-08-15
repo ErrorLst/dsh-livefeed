@@ -38,10 +38,11 @@
 | --- | --- | --- |
 | 0 装载 | `fs.readText` 读 `config.json`（失败→内置默认源）与各源脚本（失败→该源报错跳过）；`_template.js` 存在则覆盖内置模板 | 状态行提示 |
 | 1 粗搜 | `codeRuntime.run({program: 模板+源脚本, bindings: api, mode:'titles'})` → items `[{title,url,snippet?,publishedAt?}]` | 脚本异常→`sourceErrors` 记录，跳过该源 |
-| 2 模型筛选 | 一次 `llm.stream`：system=筛选指令+interests；user=标题 JSON。输出 `{selected:[{index,reason}]}`，上限 `maxCandidatesPerSource` | 解析失败→跳过该源本轮 |
+| 2 模型筛选 | 一次 `llm.stream`：system=筛选指令+interests+**规则文档（preferences.json）+最近反馈示例**；user=标题 JSON。输出 `{selected:[{index,reason}]}`，上限 `maxCandidatesPerSource`。先做**确定性过滤**（block 关键词直接丢弃、prefer 关键词提权），再做语义过滤 | 解析失败→跳过该源本轮 |
 | 3 精搜 | 对每个候选 `codeRuntime.run(mode:'content', item)` → `{text}`（≤8000 字符） | 失败且有 snippet → 降级为 snippet 摘要卡片；否则跳过 |
 | 4 模型摘要 | 候选**批量**一次 `llm.stream`：输出 `[{title,summary}]`（2–3 句，`summaryLanguage`） | 失败→保留粗搜标题+正文截断兜底出卡 |
 | 5 落库 | URL 去重（内存保留最近 5 周期 URL 集）；新卡 `isNew`；上限 `maxCards`；更新 `lastRunAt`/状态 | — |
+| 6 规则学习 | 若 `feedbackQueue` 有未消费的新标记：一次 `llm.stream` 增量更新规则文档（`preferences.json`）；标记积累超阈值或用户手动触发时改为**抽样重训** | 失败→保留旧规则并提示 |
 
 ### 模型调用
 
@@ -95,6 +96,9 @@
 | `livefeed/refresh` | — | `{ accepted: boolean }`（运行中则幂等拒绝） |
 | `livefeed/model-catalog` | — | `{ providers: [{id, name, models: [{id, name, efforts: [{id, name}]}]}] }`（面板「模型选择」级联数据源，来自 `llm.listProviders()/listModels()/resolveModelInfo()`） |
 | `livefeed/update-settings` | `{ intervalMinutes?, model?, sources?: [{id, enabled}] }` | `{ ok: boolean, error? }`（增量合并写回 `config.json`，下一周期生效） |
+| `livefeed/mark` | `{ cardId, read?, feedback? }` | `{ ok }`（写 `state.json`：已读/感兴趣/不感兴趣） |
+| `livefeed/rules` | — | `{ rules }`（当前规则文档 `preferences.json`） |
+| `livefeed/rerun-rules` | — | `{ accepted }`（触发一次规则重训，运行中则幂等拒绝） |
 
 ### 6.1 面板设置
 
@@ -106,13 +110,64 @@
 
 保存经 `livefeed/update-settings` 增量合并写回 `config.json`（`fs.writeText`），不覆盖脚本字段（`script/query` 等保留）。
 
-## 7. 安全与隔离
+## 7. 阅读状态、用户反馈与过滤规则学习（v2 新增）
+
+### 7.1 阅读状态与分组
+
+- 每张卡片有 `read: boolean`；点击卡片（打开原文）后自动置为已读（Client 在 `<a>` 的 click 中先调 `livefeed/mark` 再放行新标签页）。
+- 面板列表分「未读 / 已读」两组（原型已验证），`isNew` 徽标仅未读卡片显示；已读卡片标题降饱和。
+
+### 7.2 用户反馈（左滑）
+
+- 卡片**左滑**露出「感兴趣 / 不感兴趣」两个按钮（原型已验证手势：拖拽 ≥42px 松手即吸附露出）；标记后卡片视为已处理（进入「已读」组）并显示反馈标签。
+- 反馈持久化：`state.json` 保存每张卡片的状态；`feedbackQueue`（有界，最近 50 条）供规则学习消费。
+
+### 7.3 过滤规则学习（分层架构）
+
+**决策：全量归档 + 有界反馈窗口 + AI 维护的规则文档。** 不采用「每次把全部历史完整喂给 AI」——上下文与 token 成本随周期无限增长，必然撑爆窗口且增量价值趋近于零；也不采用「只靠 AI 生成的规则」——规则是有损压缩，易漏细微偏好且会漂移。
+
+| 层 | 文件 | 作用 | 进入每周期提示词 |
+| --- | --- | --- | --- |
+| 全量归档 | `history.jsonl` | 所有条目+标记，追加式 | 否（仅重训时抽样读取） |
+| 反馈窗口 | `state.json` 内 `feedbackQueue` | 最近 50 条已标记条目 | 是（有界） |
+| 规则文档 | `preferences.json` | AI 维护的结构化规则 | 是（紧凑） |
+
+规则文档结构（示意）：
+
+```json
+{
+  "version": 3,
+  "updatedAt": "…",
+  "prefer": ["AI Agent 框架", "长上下文模型", "本地优先工具"],
+  "block": ["营销软文", "招聘帖", "纯转载"],
+  "sourceWeights": { "hn": 1.2, "linuxdo": 1.0 },
+  "semanticNotes": "用户偏好工程向实操内容，排斥泛泛而谈的综述"
+}
+```
+
+- **确定性过滤（代码层）**：`block` 关键词命中直接丢弃（零模型成本）；`prefer` 命中提升排序。
+- **语义过滤（模型层）**：阶段 2 筛选提示词 = interests + 规则文档 + 最近反馈示例（标题+标记），输出格式不变。
+- **增量学习**：每周期末尾，`feedbackQueue` 有未消费标记时，一次 llm 调用：输入=当前规则+新增标记 → 输出=更新后规则（增量合并、版本号+1），写回 `preferences.json`。
+- **规则重训（防漂移）**：标记积累超阈值（默认 200 条）或用户手动触发（设置页「立即重新学习」）时，从 `history.jsonl` 抽样（每类各约 30 条）重写规则。
+
+### 7.4 持久化文件（livefeed 配置目录下）
+
+| 文件 | 说明 |
+| --- | --- |
+| `config.json` | 原有配置（间隔/模型/源） |
+| `state.json` | 卡片状态（read/feedback）+ feedbackQueue |
+| `history.jsonl` | 全量归档，追加式，每行一条 |
+| `preferences.json` | 规则文档（AI 维护，可人工编辑） |
+
+写入均经 `fs.writeText`（原子）；失败降级为内存态并在面板状态行提示。
+
+## 8. 安全与隔离
 
 - 源脚本在 `codeRuntime`（worker-thread）中执行：无网络、无文件访问；只能调用注入的 `api` 绑定。
 - `api` 绑定仅暴露 `mode/config/item/search/fetchContent` 五类能力，不暴露 fs/shell 等 Host 能力。
 - 正文/标题均做长度截断，防止异常源输出超限。
 
-## 8. 主题适配
+## 9. 主题适配
 
 面板全部颜色使用 DSH 设计平台令牌（源：`dsh-client-ui-theme/lib/styles/design-platform.css`）：
 
@@ -132,7 +187,7 @@
 
 原型 `prototype/prototype.html` 内嵌了明暗两套静态值以便独立预览；真实插件直接引用 `var(--dsw-alias-*)`，由宿主注入。
 
-## 9. 关键技术决策记录
+## 10. 关键技术决策记录
 
 | 决策 | 选择 | 原因（已核实） |
 | --- | --- | --- |
@@ -144,7 +199,7 @@
 | 模型调用 | `llm.stream` + 手工构造消息 | `GenerateOptions`/`ContentBlock` 形状已核对（dsh-llm） |
 | 数据推送 | Client 15s 轮询 RPC | Package RPC 为 Client→Host 单向，无推送通道 |
 
-## 10. 已知限制与扩展点
+## 11. 已知限制与扩展点
 
 - 悬浮面板与详情列（details）同时打开时会覆盖其右缘 → 可折叠面板缓解。
 - 示例源依赖站点可用性与反爬策略，失败按第 3 节表格降级。
