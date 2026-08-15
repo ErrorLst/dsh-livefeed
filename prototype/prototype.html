@@ -328,7 +328,22 @@ body {
 .lf-status[data-phase="error"] .lf-dot { background: var(--dsw-alias-state-error-primary); }
 .lf-status[data-phase="error"] { color: var(--dsw-alias-state-error-primary); }
 @keyframes lf-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
-.lf-status .lf-status-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.lf-status .lf-status-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; cursor: help; }
+.lf-cycle-stats { cursor: help; }
+
+/* 悬停提示（完整信息） */
+.lf-tooltip {
+  position: fixed; z-index: 300; pointer-events: none;
+  max-width: 320px; padding: 8px 10px; border-radius: 8px;
+  background: var(--dsw-alias-tooltip-bg); color: var(--dsw-static-neutral-bluish-00);
+  font-size: 11px; line-height: 1.7;
+  opacity: 0; visibility: hidden; transition: opacity .12s;
+}
+.lf-tooltip.show { opacity: 1; visibility: visible; }
+.lf-tooltip .tt-title { font-weight: 600; margin-bottom: 2px; }
+.lf-tooltip .tt-row { color: rgba(255, 255, 255, .82); white-space: nowrap; }
+.lf-tooltip .tt-row .tt-ok { color: var(--dsw-alias-state-success-primary); }
+.lf-tooltip .tt-row .tt-err { color: var(--dsw-alias-state-error-primary); }
 .lf-mark-all {
   flex: none; margin-left: auto; border: none; background: none;
   color: var(--dsw-alias-state-business-primary); font-size: 11px;
@@ -784,6 +799,9 @@ body {
   <span class="lf-fab-dot" id="fabDot" title="有新内容"></span>
 </button>
 
+<!-- ══ 悬停提示 ══ -->
+<div class="lf-tooltip" id="lfTooltip"></div>
+
 <!-- ══ 原型调试工具条 ══ -->
 <div class="proto-bar">
   <div class="pb-row">
@@ -1175,6 +1193,38 @@ function renderSourceRows() {
 btnRefresh.addEventListener('click', simulateRefresh);
 /* 暂停/恢复（原型模拟，不持久化） */
 let paused = false;
+
+/* ══ 状态行悬停提示（完整信息）══ */
+const tooltip = document.getElementById('lfTooltip');
+const STATUS_TIP =
+  '<div class="tt-title">采集状态</div>' +
+  '<div class="tt-row">上次刷新：2026-08-14 12:34:56</div>' +
+  '<div class="tt-row">已运行周期：5 · 当前状态：正常</div>' +
+  '<div class="tt-row">搜索源：<span class="tt-ok">3 正常</span> · <span class="tt-err">0 出错</span></div>' +
+  '<div class="tt-row">· AI 资讯搜索 — 正常（17 条）</div>' +
+  '<div class="tt-row">· Hacker News — 正常（21 条）</div>' +
+  '<div class="tt-row">· Linux.do — 正常（9 条）</div>';
+const STATS_TIP =
+  '<div class="tt-title">本次周期统计</div>' +
+  '<div class="tt-row">扫描 47 条 → 精选 6 条 → 屏蔽 3 条</div>' +
+  '<div class="tt-row">屏蔽明细：屏蔽词命中 2 · 模型筛选 1</div>' +
+  '<div class="tt-row">新增卡片 3 · 跳过重复 4 · 多源合并 2</div>';
+
+function showTooltip(anchor, html) {
+  tooltip.innerHTML = html;
+  tooltip.classList.add('show');
+  const r = anchor.getBoundingClientRect();
+  const w = tooltip.offsetWidth;
+  tooltip.style.left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8)) + 'px';
+  tooltip.style.top = (r.bottom + 6) + 'px';
+}
+function hideTooltip() { tooltip.classList.remove('show'); }
+
+statusText.addEventListener('mouseenter', () => showTooltip(statusText, STATUS_TIP));
+statusText.addEventListener('mouseleave', hideTooltip);
+document.querySelector('.lf-cycle-stats').addEventListener('mouseenter', (e) => showTooltip(e.currentTarget, STATS_TIP));
+document.querySelector('.lf-cycle-stats').addEventListener('mouseleave', hideTooltip);
+
 btnPause.addEventListener('click', () => {
   paused = !paused;
   btnPause.textContent = paused ? '恢复' : '暂停';
