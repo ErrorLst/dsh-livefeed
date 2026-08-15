@@ -23,10 +23,9 @@
 └──────────────▲──────────────────▲──────────────────┘
     host.call('dsh-livefeed/refresh')   host.call('dsh-livefeed/cards')
 ┌──────────────┴──────────────────┴──────────────────┐
-│ Host（定时管线，每 intervalMinutes 一个周期）               │
-│ ①读配置/脚本(fs) → ②粗搜(模板+源脚本,codeRuntime)          │
-│ ③模型筛选(llm) → ④精搜(模板+源脚本,codeRuntime)            │
-│ ⑤模型摘要(llm) → ⑥去重、内存态、RPC 查询                    │
+│ Host（定时管线，每 intervalMinutes 一个周期；支持暂停/重试）     │
+│ ①装载(fs) → ②粗搜(codeRuntime) → ③筛选(llm+规则) → ④事件聚类(llm) │
+│ ⑤精搜(codeRuntime) → ⑥摘要(llm) → ⑦落库/归档/统计 → ⑧规则学习    │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -36,13 +35,19 @@
 
 | 阶段 | 动作 | 失败处理 |
 | --- | --- | --- |
-| 0 装载 | `fs.readText` 读 `config.json`（失败→内置默认源）与各源脚本（失败→该源报错跳过）；`_template.js` 存在则覆盖内置模板 | 状态行提示 |
-| 1 粗搜 | `codeRuntime.run({program: 模板+源脚本, bindings: api, mode:'titles'})` → items `[{title,url,snippet?,publishedAt?}]` | 脚本异常→`sourceErrors` 记录，跳过该源 |
-| 2 模型筛选 | 一次 `llm.stream`：system=筛选指令+interests+**规则文档（preferences.json）+最近反馈示例**；user=标题 JSON。输出 `{selected:[{index,reason}]}`，上限 `maxCandidatesPerSource`。先做**确定性过滤**（block 关键词直接丢弃、prefer 关键词提权），再做语义过滤 | 解析失败→跳过该源本轮 |
-| 3 精搜 | 对每个候选 `codeRuntime.run(mode:'content', item)` → `{text}`（≤8000 字符） | 失败且有 snippet → 降级为 snippet 摘要卡片；否则跳过 |
-| 4 模型摘要 | 候选**批量**一次 `llm.stream`：输出 `[{title,summary}]`（2–3 句，`summaryLanguage`） | 失败→保留粗搜标题+正文截断兜底出卡 |
-| 5 落库 | **URL 去重**：URL 归一化（去 fragment、host 小写、去尾斜杠）后与 **seenUrls 持久集合**比对（见 §7.4），命中即丢弃，保证新增内容不与「最新/未读/已读/不感兴趣」任何一层及历史已见内容重合；新卡 `isNew`；上限 `maxCards`；更新 `lastRunAt`/状态 | — |
-| 6 规则学习 | 若 `feedbackQueue` 有未消费的新标记：一次 `llm.stream` 增量更新规则文档（`preferences.json`）；标记积累超阈值或用户手动触发时改为**抽样重训** | 失败→保留旧规则并提示 |
+| 0 装载 | `fs.readText` 读 `config.json`（失败→内置默认源）与各源脚本（失败→该源报错跳过）；`_template.js` 存在则覆盖内置模板；**生效屏蔽词 = `config.blockWords`（用户层）∪ `preferences.block`（AI 层）**；装载 `exemptUrls` 豁免集；归档超限截断（`archiveMaxEntries`） | 状态行提示 |
+| 1 粗搜 | `codeRuntime.run({program: 模板+源脚本, bindings: api, mode:'titles'})` → items `[{title,url,snippet?,publishedAt?}]`；计入 `cycleStats.scanned` | 脚本异常→`sourceErrors` 记录，跳过该源 |
+| 2 模型筛选 | **确定性过滤（代码层，零成本）**：`exemptUrls` 命中直接进候选；生效屏蔽词命中→丢弃并记 `filterLog`（reason=`block-keyword`）。**语义过滤（模型层）**：一次 `llm.stream`（system=筛选指令+interests+规则文档+最近反馈示例；user=标题 JSON）输出 `{selected:[{index,reason}]}`；未入选→记 `filterLog`（reason=`model-filter`）。上限 `maxCandidatesPerSource`。过滤数计入 `cycleStats.filtered` | 解析失败→跳过该源本轮 |
+| 3 事件聚类 | 一次 `llm.stream` 把各源入选候选按**事件**聚类（含单例簇）：输出 `{clusters:[{members:[index…]}]}`；主条目 = `sourceWeights` 加权最高成员；同事件多源合并为一张卡片（见 §7.5） | 失败→每候选独立成簇 |
+| 4 精搜 | 按簇处理：主条目 `codeRuntime.run(mode:'content')` 抓正文（≤8000 字符），成员 snippet 并入 | 失败且有 snippet → 降级为 snippet 摘要卡片；否则跳过 |
+| 5 模型摘要 | 按簇**批量**一次 `llm.stream`：输出 `[{title,summary}]`（2–3 句，`summaryLanguage`）；卡片带 `relatedUrls`（成员来源链接） | 失败→保留粗搜标题+正文截断兜底出卡 |
+| 6 落库 | **URL 去重**：URL 归一化（去 fragment、host 小写、去尾斜杠）后与 **seenUrls 持久集合**比对（见 §7.4），命中即丢弃；新卡 `isNew`；上限 `maxCards`；`cycleStats` 落状态；归档追加（超限截断）；更新 `lastRunAt`/状态 | — |
+| 7 规则学习 | 若 `feedbackQueue` 有未消费的新标记：一次 `llm.stream` 增量更新规则文档（`preferences.json`）；标记积累超阈值或用户手动触发时改为**抽样重训** | 失败→保留旧规则并提示 |
+
+### 3.1 周期调度：暂停与重试
+
+- **暂停**：状态行「暂停/恢复」按钮（`dsh-livefeed/set-paused`）；`paused` 时 tick 直接跳过（不更新 `lastRunAt`，不动数据）。暂停态**不持久化**——重启后自动恢复采集，避免「忘了开启」。
+- **重试**：周期整体失败（如 llm/web 全部不可用）→ 按 `5 分钟 × 2^attempt` 指数退避重试，最多 2 次；状态行显示「重试中 (n/2)」。重试成功或放弃后恢复正常节拍（不再额外延迟）。
 
 ### 模型调用
 
@@ -71,7 +76,9 @@
   "maxCards": 8,                  // 面板卡片上限
   "maxCandidatesPerSource": 5,    // 每源进入精搜的候选上限
   "summaryLanguage": "zh-CN",     // 摘要语言
-  "interests": ["AI Agent", "DeepSeek", "编程工具"],  // 模型筛选依据
+  "interests": ["AI Agent", "DeepSeek", "编程工具"],  // 模型筛选依据（面板可编辑）
+  "blockWords": [],               // 用户屏蔽词（面板可编辑；与 AI 学习的 preferences.block 合并生效，互不覆盖）
+  "archiveMaxEntries": 5000,      // history.jsonl 归档上限（超限滚动截断）
   "model": null,                  // null=跟随当前默认模型；或 {provider, model, reasoningEffort?}
   "sources": [
     { "id": "linuxdo", "name": "Linux.do", "script": "sources/linuxdo.js", "query": "AI", "enabled": true }
@@ -100,6 +107,10 @@
 | `dsh-livefeed/rules` | — | `{ rules }`（当前规则文档 `preferences.json`） |
 | `dsh-livefeed/rerun-rules` | — | `{ accepted }`（触发一次规则重训，运行中则幂等拒绝） |
 | `dsh-livefeed/mark-all-read` | — | `{ ok }`（全部未读（含最新）置为已读，写 `state.json`；不感兴趣组不受影响） |
+| `dsh-livefeed/set-paused` | `{ paused: boolean }` | `{ ok }`（暂停/恢复定时采集，不持久化，重启自动恢复） |
+| `dsh-livefeed/filter-log` | — | `{ items: [{title, url, sourceId, reason: 'block-keyword'\|'model-filter', ts}] }`（被过滤内容，内存态，有界 200 条） |
+| `dsh-livefeed/unblock` | `{ url }` | `{ ok }`（URL 加入 `exemptUrls` 豁免集并持久化；该条目立即以降级卡片（标题+snippet）插入未读组；后续周期豁免优先于一切过滤） |
+| `dsh-livefeed/update-words` | `{ interests?, blockWords? }` | `{ ok }`（写 `config.json` 的兴趣词/用户屏蔽词） |
 
 ### 6.1 面板设置
 
@@ -160,14 +171,23 @@
 
 | 文件 | 内容 | 说明 |
 | --- | --- | --- |
-| `config.json` | 间隔/模型/兴趣/搜索源 | 面板设置保存时写回 |
-| `state.json` | **面板数据**：所有**未读**（最新+未读组）与**不感兴趣**卡片的完整内容（id/title/summary/url/sourceName/publishedAt/createdAt/read/feedback）+ feedbackQueue | 每次周期落库与标记变更时写回；**已读且非不感兴趣的卡片不保存在此**（仅归档） |
-| `history.jsonl` | 全量归档：每周期所有条目 + 最终标记，追加式 | 供规则重训抽样；面板不直接依赖 |
+| `config.json` | 间隔/模型/兴趣/搜索源 + **用户屏蔽词 `blockWords`** + **归档上限 `archiveMaxEntries`** | 面板设置保存时写回 |
+| `state.json` | **面板数据**：所有**未读**（最新+未读组）与**不感兴趣**卡片的完整内容（id/title/summary/url/relatedUrls/sourceName/publishedAt/createdAt/read/feedback）+ feedbackQueue + **`exemptUrls` 豁免集** | 每次周期落库与标记变更时写回；**已读且非不感兴趣的卡片不保存在此**（仅归档） |
+| `history.jsonl` | 全量归档：每周期所有条目 + 最终标记，追加式；**超 `archiveMaxEntries`（默认 5000）滚动截断**（保留最近 N 条） | 供规则重训抽样；面板不直接依赖 |
 | `preferences.json` | 规则文档（AI 维护，可人工编辑） | 增量学习/重训时写回 |
 
 **重启恢复规则**：插件启动时从 `state.json` 恢复面板——未读卡片与不感兴趣卡片原样显示；恢复的卡片 `isNew` 置为 false（落入「未读」组，而非「最新」），下一周期产生新的「最新」内容。`history.jsonl` 仅作归档，不参与面板恢复。
 
 **去重（seenUrls，持久）**：启动时从 `state.json` 的全部卡片与 `history.jsonl` 全量归档构建持久 URL 集合（内存 Set，随周期与标记变更追加）。新增条目的 URL 先归一化（去 fragment、host 小写、去尾斜杠）再比对，命中即丢弃——保证新增内容不与四层中的任何一层重合，也不与历史已见内容重复。不再使用「最近 N 周期内存集合」方案。
+
+### 7.5 事件聚类、屏蔽日志与统计（v3 新增）
+
+- **事件聚类**：阶段 3 将跨源候选按事件聚类（同事件多源合并），每簇一张卡片：主条目 = `sourceWeights` 加权最高者（无权重时取 `publishedAt` 最早）；卡片带 `relatedUrls: [{url, sourceName}]`，UI 在 meta 行显示「+N 来源」。保证同一新闻不出现多张相似卡片。
+- **屏蔽日志（filterLog，内存态，有界 200 条）**：`{title, url, sourceId, reason: 'block-keyword'|'model-filter', ts}`。设置页「被屏蔽内容」区展示（标题+来源+原因），可**撤销**：
+  - 撤销 = URL 加入 `exemptUrls`（持久化于 state.json），该条目立即以**降级卡片**（标题+snippet，无模型摘要）插入未读组；
+  - 后续周期豁免优先于一切过滤（确定性+语义）；`seenUrls` 去重仍生效，不会重复展示同一 URL。
+- **被过滤统计（cycleStats）**：`{scanned, selected, filtered}`（粗搜条目 / 入选候选 / 被过滤数），状态行显示「本次 N → 精选 M → 屏蔽 K」；进入「被屏蔽内容」区顶部展示。
+- **词管理**：设置页可直接编辑 `interests`（写 config.json）与用户屏蔽词 `blockWords`（写 config.json）；生效屏蔽词 = `blockWords ∪ preferences.block`（两层互不覆盖，AI 增量学习只改后者）。
 
 写入均经 `fs.writeText`（原子）；失败降级为内存态并在面板状态行提示。
 
@@ -213,4 +233,5 @@
 
 - 悬浮面板与详情列（details）同时打开时会覆盖其右缘 → 可折叠面板缓解。
 - 示例源依赖站点可用性与反爬策略，失败按第 3 节表格降级。
-- 扩展：桌面通知联动、卡片偏好持久化、面板宽度拖拽、配置 UI、模板 TS 类型声明。
+- filterLog（被屏蔽内容）为内存态，插件重启后清空（不影响豁免集与卡片）。
+- 扩展：桌面通知联动（dsh-notify-windows）、「已读 → 未读」反向操作、卡片排序模式（时间/重要性）、用量与成本显示、规则编辑 UI、卡片缩略图、每源独立刷新间隔、模板 TS 类型声明。

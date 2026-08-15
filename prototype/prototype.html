@@ -336,6 +336,41 @@ body {
   transition: background .12s;
 }
 .lf-mark-all:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.lf-status .lf-cycle-stats { flex: none; font-size: 10px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
+.lf-status[data-phase="paused"] .lf-dot { background: var(--dsw-alias-state-warn-primary); }
+
+/* 标签编辑（兴趣词/屏蔽词） */
+.lf-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.lf-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  background: var(--dsw-specific-bubble); color: var(--dsw-alias-state-business-primary);
+}
+.lf-chip button { border: none; background: none; color: inherit; cursor: pointer; padding: 0; font-size: 12px; line-height: 1; opacity: .7; }
+.lf-chip button:hover { opacity: 1; }
+.lf-chip-add { display: flex; gap: 6px; }
+.lf-chip-add input {
+  flex: 1; min-width: 0; height: 26px; padding: 0 8px; border-radius: 7px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-specific-input-major); color: var(--dsw-alias-label-primary);
+  font-size: 12px; font-family: inherit; outline: none;
+}
+.lf-chip-add input:focus { border-color: var(--dsw-alias-state-business-primary); }
+
+/* 被屏蔽内容（可撤销） */
+.lf-filter-item { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--dsw-alias-border-l1); }
+.lf-filter-item:last-child { border-bottom: none; }
+.lf-filter-info { flex: 1; min-width: 0; }
+.lf-filter-title { font-size: 11.5px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lf-filter-meta { font-size: 10px; color: var(--dsw-alias-label-tertiary); margin-top: 1px; }
+.lf-filter-reason { font-size: 10px; padding: 0 5px; border-radius: 4px; background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-tertiary); }
+.lf-unblock {
+  flex: none; border: none; background: none;
+  color: var(--dsw-alias-state-business-primary); font-size: 11px;
+  padding: 2px 6px; border-radius: 4px; cursor: pointer;
+}
+.lf-unblock:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.lf-related { font-size: 10px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
 
 /* 列表 */
 .lf-scroll { flex: 1; overflow-y: auto; padding: 8px; }
@@ -605,6 +640,8 @@ body {
     <div class="lf-status" id="status" data-phase="idle">
       <span class="lf-dot"></span>
       <span class="lf-status-text" id="statusText">上次刷新 12:34 · 3 个源正常</span>
+      <span class="lf-cycle-stats">本次 47→6→3</span>
+      <button class="lf-mark-all" id="btnPause" title="暂停/恢复定时采集">暂停</button>
       <button class="lf-mark-all" id="btnMarkAll" title="将所有未读标记为已读">全部已读</button>
     </div>
     <div class="lf-scroll" id="scroll"></div>
@@ -697,6 +734,41 @@ body {
         </div>
       </div>
 
+      <!-- 兴趣词 -->
+      <div class="lf-sec">
+        <div class="lf-sec-title">兴趣词（正向偏好，写入 config.json）</div>
+        <div class="lf-chips" id="chipsInterests"></div>
+        <div class="lf-chip-add">
+          <input id="inInterest" placeholder="添加兴趣词，回车确认">
+          <button class="lf-ghostbtn" id="btnAddInterest" style="margin:0;height:26px;">添加</button>
+        </div>
+      </div>
+
+      <!-- 屏蔽词 -->
+      <div class="lf-sec">
+        <div class="lf-sec-title">屏蔽词（用户层，与 AI 学习合并生效）</div>
+        <div class="lf-chips" id="chipsBlock"></div>
+        <div class="lf-chip-add">
+          <input id="inBlock" placeholder="添加屏蔽词，回车确认">
+          <button class="lf-ghostbtn" id="btnAddBlock" style="margin:0;height:26px;">添加</button>
+        </div>
+      </div>
+
+      <!-- 被屏蔽内容 -->
+      <div class="lf-sec">
+        <div class="lf-sec-title">被屏蔽内容（可撤销）</div>
+        <div id="filterLog"></div>
+      </div>
+
+      <!-- 数据归档 -->
+      <div class="lf-sec">
+        <div class="lf-sec-title">数据归档</div>
+        <label class="lf-field">
+          <span>归档上限（条，超出滚动清理）</span>
+          <input type="number" id="setArchiveMax" min="100" max="100000" value="5000">
+        </label>
+      </div>
+
       <div class="lf-save-row">
         <button class="lf-primarybtn" id="btnSave">保存</button>
         <button class="lf-ghostbtn" id="btnReset">恢复默认</button>
@@ -742,6 +814,7 @@ const CARDS = [
     title: 'DeepSeek 新版推理模型发布：上下文窗口提升至 1M，API 价格下调 40%',
     summary: 'DeepSeek 今日发布新一代推理模型，宣称在代码与数学基准上显著领先，同时将 API 价格下调约 40%。官方博客提供了完整的模型卡与基准对比，业内普遍认为这将进一步压低长上下文任务的推理成本。',
     source: 'AI 资讯搜索', time: '10 分钟前', url: '#',
+    related: [{ source: 'DeepSeek 官方博客', url: '#' }, { source: 'Hacker News', url: '#' }],
   },
   {
     id: 'c2', isNew: false, read: false, feedback: null,
@@ -783,6 +856,63 @@ const btnSave = document.getElementById('btnSave');
 const btnReset = document.getElementById('btnReset');
 const btnTheme = document.getElementById('btnTheme');
 const btnMarkAll = document.getElementById('btnMarkAll');
+const btnPause = document.getElementById('btnPause');
+
+/* 标签编辑（兴趣词/屏蔽词）——原型模拟 */
+let interests = ['AI Agent', 'DeepSeek', '编程工具'];
+let blockWords = ['营销软文', '招聘帖', '纯转载'];
+
+/* 被屏蔽内容（内存态，可撤销）——原型模拟 */
+const FILTER_LOG = [
+  { title: '某厂商发布「AI 赋能企业」白皮书，通篇营销话术', source: 'search-ai', reason: 'block-keyword', ts: '12:31' },
+  { title: '零基础三个月转行 AI 的付费课程广告', source: 'search-ai', reason: 'block-keyword', ts: '12:31' },
+  { title: '一篇关于新框架的泛泛综述，无实操细节', source: 'Hacker News', reason: 'model-filter', ts: '12:30' },
+];
+
+function renderChips(containerId, list) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = list.map((w, i) =>
+    `<span class="lf-chip">${w}<button data-i="${i}" title="删除">×</button></span>`).join('');
+  el.querySelectorAll('button').forEach((b) =>
+    b.addEventListener('click', () => {
+      const list2 = containerId === 'chipsInterests' ? interests : blockWords;
+      list2.splice(Number(b.dataset.i), 1);
+      renderChips(containerId, list2);
+    }));
+}
+
+function renderFilterLog() {
+  const el = document.getElementById('filterLog');
+  if (!FILTER_LOG.length) {
+    el.innerHTML = '<div class="lf-rules-meta">暂无被屏蔽内容</div>';
+    return;
+  }
+  el.innerHTML = FILTER_LOG.map((it, i) => `<div class="lf-filter-item">
+    <div class="lf-filter-info">
+      <div class="lf-filter-title">${it.title}</div>
+      <div class="lf-filter-meta">${it.source} · ${it.ts} <span class="lf-filter-reason">${it.reason === 'block-keyword' ? '屏蔽词命中' : '模型筛选'}</span></div>
+    </div>
+    <button class="lf-unblock" data-i="${i}">撤销</button>
+  </div>`).join('');
+  el.querySelectorAll('.lf-unblock').forEach((b) =>
+    b.addEventListener('click', () => {
+      FILTER_LOG.splice(Number(b.dataset.i), 1);
+      renderFilterLog();
+      statusText.textContent = '已撤销：该条目已恢复为未读卡片 ✓';
+      setTimeout(() => setPanelState('cards'), 2600);
+    }));
+}
+
+function bindChipAdd(inputId, btnId, list, containerId) {
+  const input = document.getElementById(inputId);
+  const add = () => {
+    const v = input.value.trim();
+    if (v && !list.includes(v)) { list.push(v); renderChips(containerId, list); }
+    input.value = '';
+  };
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
+  document.getElementById(btnId).addEventListener('click', add);
+}
 
 let collapsed = false;
 let currentState = 'cards';
@@ -814,6 +944,7 @@ function cardHtml(c) {
       <div class="lf-card-summary">${c.summary}</div>
       <div class="lf-card-meta">
         <span class="lf-source-tag">${c.source}</span>
+        ${c.related && c.related.length ? `<span class="lf-related">+${c.related.length} 来源</span>` : ''}
         <span class="lf-card-time">${c.time}</span>
         ${fb}
         <span class="lf-card-time">${c.read ? '已读' : '打开原文 ↗'}</span>
@@ -1042,6 +1173,14 @@ function renderSourceRows() {
 
 /* ══ 事件 ══ */
 btnRefresh.addEventListener('click', simulateRefresh);
+/* 暂停/恢复（原型模拟，不持久化） */
+let paused = false;
+btnPause.addEventListener('click', () => {
+  paused = !paused;
+  btnPause.textContent = paused ? '恢复' : '暂停';
+  status.dataset.phase = paused ? 'paused' : (currentState === 'loading' ? 'running' : 'idle');
+  statusText.textContent = paused ? '已暂停 · 上次刷新 12:34' : '上次刷新 12:34 · 3 个源正常';
+});
 btnMarkAll.addEventListener('click', () => {
   let changed = false;
   CARDS.forEach((c) => {
@@ -1082,6 +1221,11 @@ btnSave.addEventListener('click', () => {
 /* ══ 初始 ══ */
 applyUseDefault();
 renderSourceRows();
+renderChips('chipsInterests', interests);
+renderChips('chipsBlock', blockWords);
+renderFilterLog();
+bindChipAdd('inInterest', 'btnAddInterest', interests, 'chipsInterests');
+bindChipAdd('inBlock', 'btnAddBlock', blockWords, 'chipsBlock');
 setPanelState('cards');
 </script>
 </body>
