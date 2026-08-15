@@ -1,14 +1,13 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * LiveFeed Host 半 —— cordis_define(code.host) 的函数体
+ * dsh-livefeed Host 半 —— cordis_define(code.host) 的函数体（完整实现 v1）
  * ═══════════════════════════════════════════════════════════════════════════
- * 实现状态：骨架。待 HTML 原型评审通过后，按 docs/design.md 第 3/5/6 节完成。
- *
  * 约定：
  * - 本文件内容整体作为 code.host 传入 cordis_define（不含外层 function 声明）；
  * - 仅可用 Builtins：ctx / harness / console / btoa / atob / TextEncoder / TextDecoder；
- *   不得使用 import/require/TS/JSX/全局 fetch/timer；
+ *   不得使用 import/require/TS/JSX/全局 fetch/timer；标准 JS 全局（Date/JSON/Set/Map 等）可用；
  * - 依赖服务：timer, web, llm, fs, agentDefaultModel（inject 硬依赖）；
- *   codeRuntime, shell（ctx.get 可选读取，缺失时降级/回退）。
+ *   codeRuntime, shell（ctx.get 可选读取）。
+ * 设计依据：docs/design.md（§3 管线、§6 RPC、§7 状态/反馈/规则学习）。
  */
 return {
   inject: ['timer', 'web', 'llm', 'fs', 'agentDefaultModel'],
@@ -16,113 +15,771 @@ return {
     // ══ 常量 ══
     const CONFIG_DIR = 'C:\\Users\\zhoujin\\Pictures\\dsh-workspace\\.dsh\\dsh-livefeed';
     const CONFIG_FILE = CONFIG_DIR + '\\config.json';
+    const STATE_FILE = CONFIG_DIR + '\\state.json';
+    const HISTORY_FILE = CONFIG_DIR + '\\history.jsonl';
+    const PREFERENCES_FILE = CONFIG_DIR + '\\preferences.json';
     const TEMPLATE_FILE = CONFIG_DIR + '\\sources\\_template.js';
-    const DEFAULT_INTERVAL_MS = 10 * 60 * 1000;
-    // 去重：seenUrls 持久集合（启动时从 state.json 卡片 + history.jsonl 归档构建），
-    // 新增条目 URL 归一化后比对，命中即丢弃（见 design.md §7.4）。
+    const DEFAULT_INTERVAL_MIN = 10;
+    const DEFAULT_MAX_CARDS = 8;
+    const DEFAULT_MAX_CANDIDATES = 5;
+    const DEFAULT_ARCHIVE_MAX = 5000;
+    const FEEDBACK_WINDOW = 50;
+    const FILTER_LOG_CAP = 200;
+    const RETRY_MAX = 2;
+    const RETRY_BASE_MS = 5 * 60 * 1000;
+    const TICK_MS = 30 * 1000; // 调度器基础节拍（实际周期由 config.intervalMinutes 决定）
 
-    // ══ 内置基类模板常量（与 src/template/template.js 保持同步）══
-    // TODO(评审后)：从 src/template/template.js 内联为模板字符串。
-    const BUILTIN_TEMPLATE = '';
+    // ══ 内置基类模板（base64，来自 src/template/template.js；与运行目录 sources/_template.js 二选一，文件优先）══
+    const BUILTIN_TEMPLATE = atob('Lyog4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQ4pWQCiAqIGRzaC1saXZlZmVlZCDmkJzntKLmupDln7rnsbvmqKHmnb/vvIhCYXNlIFRlbXBsYXRl77yJCiAqIOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkOKVkAogKiBIb3N0IOWwhuacrOaooeadv+S4jua6kOiEmuacrOaLvOaOpe+8iHByb2dyYW0gPSDmqKHmnb8gKyAiXG4iICsg5rqQ6ISa5pys77yJ5ZCO77yM5L2c5Li6CiAqIGNvZGVSdW50aW1lIOeahCBwcm9ncmFtIOi/kOihjOOAgua6kOiEmuacrOWPqumcgOWunueOsO+8mgogKgogKiAgIGFzeW5jIGZ1bmN0aW9uIGNvYXJzZVNlYXJjaChhcGkpICAgLy8g5b+F6YCJ77ya57KX5pCc77yM6L+U5ZueIFt7dGl0bGUsIHVybCwgc25pcHBldD8sIHB1Ymxpc2hlZEF0P31dCiAqICAgYXN5bmMgZnVuY3Rpb24gZmluZVNlYXJjaChhcGksIGl0ZW0pIC8vIOWPr+mAie+8mueyvuaQnO+8jOi/lOWbniB7IHRleHQgfe+8iOm7mOiupOWunueOsOingeS4i++8iQogKgogKiDmqKHmnb/lnKjmlofku7blsL7pg6jms6jlhaXosIPluqblmajvvIzkvp3mja4gYXBpLm1vZGUoKSDliIbmtL7vvJvlvZLkuIDljJYv5oiq5patL+WOu+mHjeeUseaooeadv+e7n+S4gOWujOaIkOOAggogKiDmupDohJrmnKzor7fli7/ph43mlrDlo7DmmI7nrKwgNCDoioLkv53nlZnlkI3vvIjop4EgZG9jcy9zb3VyY2UtY29udHJhY3QubWTvvInjgIIKICog5pys5paH5Lu25pivIEhvc3Qg5YaF572u5qih5p2/5bi46YeP55qE5rqQ5aS077ya5L+u5pS55ZCO6ZyA5ZCM5q2l5YiwIEhvc3Qg5Luj56CB5Lit55qE5qih5p2/5bi46YeP44CCCiAqLwondXNlIHN0cmljdCc7CgovLyDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIAKLy8g5bi46YePCi8vIOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgApjb25zdCBNQVhfQ09OVEVOVF9DSEFSUyA9IDgwMDA7ICAgLy8g57K+5pCc5q2j5paH5LiK6ZmQ77yI5a2X56ym77yJCmNvbnN0IERFRkFVTFRfTUFYX0lURU1TID0gMTU7ICAgICAvLyDnspfmkJzpu5jorqTmnaHnm67kuIrpmZAKCi8vIOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgAovLyDlrZDnsbvlpZHnuqbvvJpjb2Fyc2VTZWFyY2gg5b+F6YCJ77yMZmluZVNlYXJjaCDlj6/pgInvvIjmnInpu5jorqTlrp7njrDvvIkKLy8g4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSACmFzeW5jIGZ1bmN0aW9uIGNvYXJzZVNlYXJjaChhcGkpIHsKICAvLyDpu5jorqTnspfmkJzvvJrpgJrnlKggd2ViLnNlYXJjaCDlnovvvIjmupDohJrmnKzmnKrlrp7njrDkuJTmnKrphY3nva4gcXVlcnkg5pe25oqb6ZSZ5o+Q56S677yJCiAgY29uc3QgY2ZnID0gYXdhaXQgYXBpLmNvbmZpZygpOwogIGNvbnN0IHEgPSBTdHJpbmcoKGNmZyAmJiBjZmcucXVlcnkpIHx8ICcnKS50cmltKCk7CiAgaWYgKCFxKSB7CiAgICB0aHJvdyBuZXcgRXJyb3IoJ1tkc2gtbGl2ZWZlZWRdIOacquWunueOsCBjb2Fyc2VTZWFyY2gg5LiU5rqQ5pyq6YWN572uIHF1ZXJ5Jyk7CiAgfQogIGNvbnN0IHIgPSBhd2FpdCBzZWFyY2hXZWIoYXBpLCBxLCAoY2ZnICYmIGNmZy5tYXhJdGVtcykgfHwgREVGQVVMVF9NQVhfSVRFTVMpOwogIHJldHVybiByLm1hcCgocykgPT4gKHsKICAgIHRpdGxlOiBzLnRpdGxlIHx8IHMudXJsLAogICAgdXJsOiBzLnVybCwKICAgIHNuaXBwZXQ6IHMuc25pcHBldCB8fCAnJywKICAgIHB1Ymxpc2hlZEF0OiBzLnB1Ymxpc2hlZEF0IHx8IHVuZGVmaW5lZCwKICB9KSk7Cn0KCmFzeW5jIGZ1bmN0aW9uIGZpbmVTZWFyY2goYXBpLCBpdGVtKSB7CiAgLy8g6buY6K6k57K+5pCc77ya5oqT5Y+W5p2h55uuIFVSTCDlubbmj5Dlj5bmraPmlofvvIjnuq/pk77mjqXliJfooajlnovmupDml6DpnIDopobnm5bvvIkKICBjb25zdCBwYWdlID0gYXdhaXQgZmV0Y2hQYWdlKGFwaSwgaXRlbS51cmwpOwogIHJldHVybiB7IHRleHQ6IGh0bWxUb1RleHQocGFnZS5ib2R5LmNvbnRlbnQsIE1BWF9DT05URU5UX0NIQVJTKSB9Owp9CgovLyDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIAKLy8g5YWs5YWx5bel5YW377yI5Z+657G75pa55rOV77yM5rqQ6ISa5pys5Y+v55u05o6l6LCD55So77yJCi8vIOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgAovKiog5YyF6KOFIGFwaS5zZWFyY2jvvIzov5Tlm54gc291cmNlc1tdICovCmFzeW5jIGZ1bmN0aW9uIHNlYXJjaFdlYihhcGksIHF1ZXJ5LCBtYXhSZXN1bHRzKSB7CiAgY29uc3QgciA9IGF3YWl0IGFwaS5zZWFyY2goewogICAgcXVlcnk6IFN0cmluZyhxdWVyeSksCiAgICBtYXhSZXN1bHRzOiBtYXhSZXN1bHRzIHx8IERFRkFVTFRfTUFYX0lURU1TLAogIH0pOwogIHJldHVybiAociAmJiBBcnJheS5pc0FycmF5KHIuc291cmNlcykgPyByLnNvdXJjZXMgOiBbXSk7Cn0KCi8qKiDljIXoo4UgYXBpLmZldGNoQ29udGVudCAqLwphc3luYyBmdW5jdGlvbiBmZXRjaFBhZ2UoYXBpLCB1cmwpIHsKICByZXR1cm4gYXBpLmZldGNoQ29udGVudCh7IHVybDogU3RyaW5nKHVybCkgfSk7Cn0KCi8qKiBIVE1MIOWunuS9k+ino+egge+8iOWQqyA8YnI+IOaNouihjOOAgeWOu+agh+etvu+8iSAqLwpmdW5jdGlvbiBkZWNvZGVFbnRpdGllcyhzKSB7CiAgcmV0dXJuIFN0cmluZyhzKQogICAgLnJlcGxhY2UoLzxiclxzKlwvPz4vZ2ksICdcbicpCiAgICAucmVwbGFjZSgvPFtePl0rPi9nLCAnICcpCiAgICAucmVwbGFjZSgvJm5ic3A7L2dpLCAnICcpCiAgICAucmVwbGFjZSgvJmFtcDsvZ2ksICcmJykKICAgIC5yZXBsYWNlKC8mbHQ7L2dpLCAnPCcpCiAgICAucmVwbGFjZSgvJmd0Oy9naSwgJz4nKQogICAgLnJlcGxhY2UoLyZxdW90Oy9naSwgJyInKQogICAgLnJlcGxhY2UoLyYjMzk7L2csICInIikKICAgIC5yZXBsYWNlKC8mI3gyNzsvZ2ksICInIik7Cn0KCi8qKiDpgJrnlKggSFRNTOKGkuaWh+acrO+8muWOu+agh+etvuOAgeWOi+e8qeepuueZve+8jOWPr+mAieaIquaWrSAqLwpmdW5jdGlvbiBodG1sVG9UZXh0KGh0bWwsIG1heExlbikgewogIGxldCB0ZXh0ID0gZGVjb2RlRW50aXRpZXMoaHRtbCkKICAgIC5yZXBsYWNlKC9bIFx0XSsvZywgJyAnKQogICAgLnJlcGxhY2UoL1xuezMsfS9nLCAnXG5cbicpCiAgICAudHJpbSgpOwogIGlmIChtYXhMZW4gJiYgdGV4dC5sZW5ndGggPiBtYXhMZW4pIHRleHQgPSB0ZXh0LnNsaWNlKDAsIG1heExlbikgKyAn4oCmJzsKICByZXR1cm4gdGV4dDsKfQoKLyoqIOWPluWAvOi+heWKqe+8iOWtl+espuS4sumUruaIluWHveaVsO+8iSAqLwpmdW5jdGlvbiBwaWNrKG9iaiwga2V5KSB7CiAgaWYgKGtleSA9PT0gbnVsbCB8fCBrZXkgPT09IHVuZGVmaW5lZCkgcmV0dXJuICcnOwogIGlmICh0eXBlb2Yga2V5ID09PSAnZnVuY3Rpb24nKSByZXR1cm4ga2V5KG9iaik7CiAgY29uc3QgdiA9IG9ialtrZXldOwogIHJldHVybiB2ID09PSBudWxsIHx8IHYgPT09IHVuZGVmaW5lZCA/ICcnIDogU3RyaW5nKHYpOwp9CgovKiog5bCGIEpTT04gQVBJIOWIl+ihqOinhOaVtOS4uiBpdGVtc++8mnt0aXRsZUtleSwgdXJsS2V5LCBzbmlwcGV0S2V5PywgcHVibGlzaGVkQXRLZXk/LCB1cmxGYWxsYmFjaz99ICovCmZ1bmN0aW9uIGpzb25JdGVtcyhsaXN0LCBvcHRzKSB7CiAgY29uc3QgbyA9IG9wdHMgfHwge307CiAgcmV0dXJuIChBcnJheS5pc0FycmF5KGxpc3QpID8gbGlzdCA6IFtdKS5tYXAoKHgpID0+ICh7CiAgICB0aXRsZTogcGljayh4LCBvLnRpdGxlS2V5KSwKICAgIHVybDogcGljayh4LCBvLnVybEtleSkgfHwgKHR5cGVvZiBvLnVybEZhbGxiYWNrID09PSAnZnVuY3Rpb24nID8gcGljayh4LCBvLnVybEZhbGxiYWNrKSA6ICcnKSwKICAgIHNuaXBwZXQ6IG8uc25pcHBldEtleSA/IHBpY2soeCwgby5zbmlwcGV0S2V5KSA6ICcnLAogICAgcHVibGlzaGVkQXQ6IG8ucHVibGlzaGVkQXRLZXkgPyBwaWNrKHgsIG8ucHVibGlzaGVkQXRLZXkpIHx8IHVuZGVmaW5lZCA6IHVuZGVmaW5lZCwKICB9KSk7Cn0KCi8vIOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgAovLyDlvZLkuIDljJbvvIjmqKHmnb/lhoXpg6jvvIkKLy8g4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSACmZ1bmN0aW9uIF9ub3JtYWxpemVUaXRsZXMoaXRlbXMsIGNmZykgewogIGlmICghQXJyYXkuaXNBcnJheShpdGVtcykpIHsKICAgIHRocm93IG5ldyBFcnJvcignW2RzaC1saXZlZmVlZF0gY29hcnNlU2VhcmNoIOW/hemhu+i/lOWbnuaVsOe7hCcpOwogIH0KICBjb25zdCBtYXggPSAoY2ZnICYmIGNmZy5tYXhJdGVtcykgfHwgREVGQVVMVF9NQVhfSVRFTVM7CiAgY29uc3Qgc2VlbiA9IG5ldyBTZXQoKTsKICBjb25zdCBvdXQgPSBbXTsKICBmb3IgKGNvbnN0IGl0IG9mIGl0ZW1zKSB7CiAgICBpZiAoIWl0IHx8IHR5cGVvZiBpdCAhPT0gJ29iamVjdCcpIGNvbnRpbnVlOwogICAgY29uc3QgdXJsID0gU3RyaW5nKGl0LnVybCB8fCAnJykudHJpbSgpOwogICAgY29uc3QgdGl0bGUgPSBTdHJpbmcoaXQudGl0bGUgfHwgJycpLnRyaW0oKTsKICAgIGlmICghdXJsIHx8ICF0aXRsZSB8fCBzZWVuLmhhcyh1cmwpKSBjb250aW51ZTsKICAgIHNlZW4uYWRkKHVybCk7CiAgICBvdXQucHVzaCh7CiAgICAgIHRpdGxlLAogICAgICB1cmwsCiAgICAgIHNuaXBwZXQ6IGl0LnNuaXBwZXQgPyBTdHJpbmcoaXQuc25pcHBldCkuc2xpY2UoMCwgNTAwKSA6ICcnLAogICAgICBwdWJsaXNoZWRBdDogdHlwZW9mIGl0LnB1Ymxpc2hlZEF0ID09PSAnc3RyaW5nJyA/IGl0LnB1Ymxpc2hlZEF0IDogdW5kZWZpbmVkLAogICAgfSk7CiAgICBpZiAob3V0Lmxlbmd0aCA+PSBtYXgpIGJyZWFrOwogIH0KICByZXR1cm4gb3V0Owp9CgpmdW5jdGlvbiBfbm9ybWFsaXplQ29udGVudChvdXQpIHsKICBpZiAoIW91dCB8fCB0eXBlb2Ygb3V0ICE9PSAnb2JqZWN0JykgewogICAgdGhyb3cgbmV3IEVycm9yKCdbZHNoLWxpdmVmZWVkXSBmaW5lU2VhcmNoIOW/hemhu+i/lOWbniB7IHRleHQgfScpOwogIH0KICBjb25zdCB0ZXh0ID0gU3RyaW5nKG91dC50ZXh0IHx8ICcnKS50cmltKCk7CiAgaWYgKCF0ZXh0KSB0aHJvdyBuZXcgRXJyb3IoJ1tkc2gtbGl2ZWZlZWRdIGZpbmVTZWFyY2gg6L+U5Zue55qE5q2j5paH5Li656m6Jyk7CiAgcmV0dXJuIHsgdGV4dDogdGV4dC5zbGljZSgwLCBNQVhfQ09OVEVOVF9DSEFSUykgfTsKfQoKLy8g4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSACi8vIOiwg+W6puWZqO+8iOaooeadv+WGhee9ru+8m+a6kOiEmuacrOaXoOmcgOWFs+W/g++8iQovLyDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIAKYXN5bmMgZnVuY3Rpb24gX2RzaExpdmVmZWVkRGlzcGF0Y2hlcigpIHsKICBjb25zdCBtb2RlID0gYXdhaXQgYXBpLm1vZGUoKTsKICBpZiAobW9kZSA9PT0gJ3RpdGxlcycpIHsKICAgIHJldHVybiBfbm9ybWFsaXplVGl0bGVzKGF3YWl0IGNvYXJzZVNlYXJjaChhcGkpLCBhd2FpdCBhcGkuY29uZmlnKCkpOwogIH0KICBpZiAobW9kZSA9PT0gJ2NvbnRlbnQnKSB7CiAgICBjb25zdCBpdGVtID0gYXdhaXQgYXBpLml0ZW0oKTsKICAgIHJldHVybiBfbm9ybWFsaXplQ29udGVudChhd2FpdCBmaW5lU2VhcmNoKGFwaSwgaXRlbSkpOwogIH0KICB0aHJvdyBuZXcgRXJyb3IoJ1tkc2gtbGl2ZWZlZWRdIOacquefpeaooeW8jzogJyArIFN0cmluZyhtb2RlKSk7Cn0KCnJldHVybiBhd2FpdCBfZHNoTGl2ZWZlZWREaXNwYXRjaGVyKCk7Cg==');
 
     // ══ 运行时状态（进程内存）══
     const state = {
-      cards: [],          // [{id,title,summary,url,sourceName,publishedAt?,isNew}]
+      config: null,          // 当前配置（加载失败时用内置默认）
+      cards: [],             // 面板卡片（未读 + 不感兴趣 + 有界已读）
+      seenUrls: new Set(),   // 持久去重集合（启动装载，周期追加）
+      archive: [],           // history.jsonl 内存镜像（有界）
+      preferences: null,     // 规则文档（AI 维护 + 用户可编辑）
+      exemptUrls: new Set(), // 豁免集（撤销屏蔽）
+      feedbackQueue: [],     // 未消费的「不感兴趣」标记（有界，规则学习消费）
+      filterLog: [],         // 被屏蔽内容（内存，有界）
+      cycleStats: null,      // {scanned, selected, filtered}
       running: false,
+      paused: false,
+      retrying: 0,
       lastRunAt: undefined,
       lastError: undefined,
-      sourceErrors: [],   // [{sourceId, message}]
-      seenUrls: new Set(), // 持久去重集合（启动装载，周期追加）
+      sourceErrors: [],
       tick: 0,
+      mid: 0,                // 消息 id 计数器
     };
+    let disposed = false;
 
-    // ══ 工具 ══
-    function readConfig() {
-      // TODO(评审后)：fs.resolve + fs.readText 读 CONFIG_FILE，解析失败返回内置默认配置
+    // ══ fs 工具 ══
+    async function fsRead(absPath) {
+      try {
+        const target = await ctx.fs.resolve(absPath);
+        return await ctx.fs.readText(target);
+      } catch (_) {
+        return null;
+      }
+    }
+    async function fsWrite(absPath, content) {
+      try {
+        const target = await ctx.fs.resolve(absPath);
+        await ctx.fs.writeText(target, content);
+        return true;
+      } catch (err) {
+        console.error('[dsh-livefeed] write failed:', absPath, String(err && err.message || err));
+        return false;
+      }
+    }
+    function parseJson(text, fallback) {
+      try {
+        return text ? JSON.parse(text) : fallback;
+      } catch (_) {
+        return fallback;
+      }
+    }
+
+    // ══ 默认值 ══
+    function defaultConfig() {
+      return {
+        intervalMinutes: DEFAULT_INTERVAL_MIN,
+        maxCards: DEFAULT_MAX_CARDS,
+        maxCandidatesPerSource: DEFAULT_MAX_CANDIDATES,
+        summaryLanguage: 'zh-CN',
+        interests: [],
+        blockWords: [],
+        archiveMaxEntries: DEFAULT_ARCHIVE_MAX,
+        model: null,
+        sources: [],
+      };
+    }
+    function defaultPreferences() {
+      return { version: 1, updatedAt: undefined, prefer: [], block: [], sourceWeights: {}, semanticNotes: '' };
+    }
+    function mergeConfig(base, cfg) {
+      if (!cfg || typeof cfg !== 'object') return base;
+      const out = {};
+      for (const k of Object.keys(base)) out[k] = cfg[k] !== undefined ? cfg[k] : base[k];
+      if (!Array.isArray(out.sources)) out.sources = [];
+      if (!Array.isArray(out.interests)) out.interests = [];
+      if (!Array.isArray(out.blockWords)) out.blockWords = [];
+      return out;
+    }
+
+    // ══ URL 归一化（无 URL 全局，正则实现）══
+    function normalizeUrl(raw) {
+      let s = String(raw || '').trim();
+      if (!s) return s;
+      s = s.split('#')[0].replace(/\/+$/, '');
+      const m = s.match(/^https?:\/\/([^\/]+)(.*)$/i);
+      if (m) s = 'http://' + m[1].toLowerCase() + m[2];
+      return s;
+    }
+
+    // ══ 模型调用（llm.stream + 手工构造消息）══
+    function resolveModel() {
+      const cfgModel = state.config && state.config.model;
+      if (cfgModel && cfgModel.provider && cfgModel.model) {
+        return { provider: cfgModel.provider, model: cfgModel.model, reasoningEffort: cfgModel.reasoningEffort };
+      }
+      const sel = ctx.agentDefaultModel.currentSelection();
+      return { provider: sel.provider, model: sel.model, reasoningEffort: sel.reasoningEffort };
+    }
+    async function callModel(system, userText, maxTokens) {
+      const sel = resolveModel();
+      const opts = {
+        provider: sel.provider,
+        model: sel.model,
+        system: system || '',
+        maxTokens: maxTokens || 3000,
+        messages: [{
+          id: 'dsh-livefeed-' + (++state.mid),
+          role: 'user',
+          content: [{ type: 'text', text: userText }],
+          source: { kind: 'user' },
+        }],
+      };
+      if (sel.reasoningEffort) opts.reasoningEffort = sel.reasoningEffort;
+      let text = '';
+      let failure = null;
+      try {
+        for await (const ch of ctx.llm.stream(opts)) {
+          if (ch.type === 'text-delta') text += ch.text;
+          else if (ch.type === 'finish' && (ch.reason.kind === 'error' || ch.reason.kind === 'aborted')) {
+            failure = (ch.reason.failure && ch.reason.failure.message) || ch.reason.kind;
+          }
+        }
+      } catch (err) {
+        failure = String((err && err.message) || err);
+      }
+      if (failure) throw new Error('模型调用失败: ' + failure);
+      return text;
+    }
+
+    // 容错 JSON 提取（首个平衡 {…}）
+    function extractJson(text) {
+      const s = String(text || '');
+      const start = s.indexOf('{');
+      if (start < 0) return null;
+      let depth = 0, inStr = false, esc = false;
+      for (let i = start; i < s.length; i++) {
+        const ch = s[i];
+        if (inStr) {
+          if (esc) esc = false;
+          else if (ch === '\\') esc = true;
+          else if (ch === '"') inStr = false;
+          continue;
+        }
+        if (ch === '"') inStr = true;
+        else if (ch === '{') depth++;
+        else if (ch === '}') {
+          depth--;
+          if (depth === 0) {
+            try { return JSON.parse(s.slice(start, i + 1)); } catch (_) { return null; }
+          }
+        }
+      }
       return null;
     }
 
-    function readFileText(absPath) {
-      // TODO(评审后)：fs.resolve(absPath) → fs.readText；不存在返回 null
-      return null;
+    // ══ 正文抓取：web.fetch → curl 回退 ══
+    async function fetchContentImpl(url) {
+      try {
+        const r = await ctx.web.fetch({ url: String(url) });
+        return { url: r.url, statusCode: r.statusCode, body: r.body, truncated: !!r.truncated };
+      } catch (_) {
+        return fetchViaCurl(String(url));
+      }
+    }
+    async function fetchViaCurl(url) {
+      const shell = ctx.get('shell');
+      if (shell === undefined) throw new Error('web.fetch 与 shell 均不可用');
+      const safeUrl = String(url).replace(/"/g, '%22');
+      const spec = shell.resolve({
+        command: 'curl -sL --max-time 20 --compressed "' + safeUrl + '"',
+        timeoutMs: 30000,
+        stdoutMaxBytes: 1200000,
+      });
+      const res = await shell.run(spec);
+      if (res.exitCode !== 0) throw new Error('curl 失败 exit=' + res.exitCode);
+      const text = (res.stdout && res.stdout.text) || '';
+      if (!text) throw new Error('curl 返回空内容');
+      const lower = text.slice(0, 2000).toLowerCase();
+      const kind = /<html|<head|<body/i.test(lower) ? 'html' : 'text';
+      return { url: String(url), statusCode: 200, body: { kind, content: text }, truncated: !!(res.stdout && res.stdout.truncated) };
     }
 
-    function runSourceScript(program, args) {
-      // TODO(评审后)：codeRuntime.run({program, bindings:[{global:'api', functions}], signal})
-      //  codeRuntime 缺失 → shell.run('node <临时脚本>') 回退（解析 stdout JSON）
-      return Promise.resolve(null);
+    // ══ 源脚本执行（codeRuntime；缺失时报错并跳过该源）══
+    function buildProgram(template, script) {
+      return template + '\n' + (script || '');
+    }
+    async function loadTemplateAndScript(source) {
+      let template = BUILTIN_TEMPLATE;
+      const custom = await fsRead(TEMPLATE_FILE);
+      if (custom && custom.indexOf('_dshLivefeedDispatcher') >= 0) template = custom;
+      else if (custom) console.error('[dsh-livefeed] sources/_template.js 缺少调度器标记，回退内置模板');
+      let script = '';
+      if (source && source.script) {
+        const abs = CONFIG_DIR + '\\' + String(source.script).replace(/\//g, '\\');
+        const sp = await fsRead(abs);
+        if (sp === null) throw new Error('源脚本不存在: ' + source.script);
+        script = sp;
+      }
+      return buildProgram(template, script);
+    }
+    async function runSourceScript(program, args) {
+      const codeRuntime = ctx.get('codeRuntime');
+      if (codeRuntime === undefined) throw new Error('codeRuntime 服务不可用：无法执行源脚本');
+      const bindings = [{
+        global: 'api',
+        functions: {
+          mode: async () => args.mode,
+          config: async () => (args.config || {}),
+          item: async () => (args.item || null),
+          search: async (a) => {
+            const req = a || {};
+            return ctx.web.search({ query: String(req.query || ''), maxResults: req.maxResults });
+          },
+          fetchContent: async (a) => fetchContentImpl((a || {}).url),
+        },
+      }];
+      const run = await codeRuntime.run({ program, bindings });
+      if (run.error) throw new Error('脚本执行失败: ' + run.error.message);
+      return run.value;
     }
 
-    function callModel(system, userText, maxTokens) {
-      // TODO(评审后)：llm.stream({provider, model, reasoningEffort?,
-      //   system, messages:[{id:'dsh-livefeed-<n>', role:'user',
-      //     content:[{type:'text',text:userText}], source:{kind:'user'}}],
-      //   maxTokens}) 收集 text-delta；容错 JSON 提取
-      return Promise.resolve(null);
+    // ══ 屏蔽日志 ══
+    function pushFilterLog(it, source, reason) {
+      state.filterLog.push({
+        title: String(it.title || ''),
+        url: String(it.url || ''),
+        sourceId: source ? String(source.id || '') : '',
+        reason,
+        ts: new Date().toISOString(),
+      });
+      if (state.filterLog.length > FILTER_LOG_CAP) state.filterLog.splice(0, state.filterLog.length - FILTER_LOG_CAP);
     }
 
     // ══ 管线阶段 ══
-    async function stageCoarseSearch(source, script, template) {
-      // 粗搜：runSourceScript(模板+脚本, {mode:'titles'}) → items
-      return [];
+    async function stageCoarse(source) {
+      const program = await loadTemplateAndScript(source);
+      const items = await runSourceScript(program, { mode: 'titles', config: source });
+      return Array.isArray(items) ? items : [];
     }
 
-    async function stageJudgeTitles(source, items) {
-      // 模型筛选：interests + 标题 JSON → selected indices（上限 maxCandidatesPerSource）
-      return [];
+    async function stageJudge(source, items) {
+      const effectiveBlock = (state.config.blockWords || []).concat(state.preferences.block || []);
+      // 确定性过滤
+      const kept = [];
+      for (const it of items) {
+        const urlKey = normalizeUrl(it.url);
+        if (state.exemptUrls.has(urlKey)) { kept.push(it); continue; }
+        const title = String(it.title || '').toLowerCase();
+        const hit = (effectiveBlock || []).find((w) => w && title.indexOf(String(w).toLowerCase()) >= 0);
+        if (hit) { pushFilterLog(it, source, 'block-keyword'); continue; }
+        kept.push(it);
+      }
+      if (!kept.length) return [];
+      // 语义过滤
+      const list = kept.map((it, i) => ({ i, title: it.title, url: it.url, snippet: String(it.snippet || '').slice(0, 200) }));
+      const recent = state.feedbackQueue.slice(-10).map((f) => '【不感兴趣】' + f.title);
+      const system =
+        '你是信息筛选助手。用户配置的兴趣与规则如下，判断哪些条目值得精读并生成摘要卡片。' +
+        '\n兴趣: ' + JSON.stringify(state.config.interests || []) +
+        '\n规则: ' + JSON.stringify({ prefer: state.preferences.prefer || [], block: effectiveBlock, semanticNotes: state.preferences.semanticNotes || '' }) +
+        '\n最近不感兴趣样本: ' + JSON.stringify(recent) +
+        '\n只输出 JSON: {"selected":[{"index":0,"reason":"一句话理由"}]}。宁可少选，不选明显无关或与样本相似的内容。';
+      const raw = await callModel(system, JSON.stringify(list, null, 1), 2000);
+      const parsed = extractJson(raw);
+      const selected = new Set();
+      if (parsed && Array.isArray(parsed.selected)) {
+        for (const s of parsed.selected) {
+          const idx = Number(s && s.index);
+          if (Number.isInteger(idx) && idx >= 0 && idx < kept.length) selected.add(idx);
+        }
+      } else {
+        throw new Error('筛选结果解析失败');
+      }
+      const out = [];
+      for (let i = 0; i < kept.length; i++) {
+        if (selected.has(i)) out.push(kept[i]);
+        else pushFilterLog(kept[i], source, 'model-filter');
+      }
+      return out.slice(0, state.config.maxCandidatesPerSource || DEFAULT_MAX_CANDIDATES);
     }
 
-    async function stageFineSearch(source, script, template, item) {
-      // 精搜：runSourceScript(模板+脚本, {mode:'content', item}) → {text}
-      return null;
+    async function stageCluster(candidates) {
+      if (candidates.length <= 1) return candidates.map((c) => ({ members: [c] }));
+      const list = candidates.map((c, i) => ({ i, title: c.item.title, url: c.item.url, source: c.source.name }));
+      const system =
+        '将以下条目按“同一事件/话题”聚类（不同网站报道同一新闻算同一簇）。' +
+        '只输出 JSON: {"clusters":[{"members":[0,2]}]}。每个条目只能属于一个簇；无法归并的条目单独成簇 [i]。';
+      const raw = await callModel(system, JSON.stringify(list, null, 1), 1500);
+      const parsed = extractJson(raw);
+      const clusters = [];
+      const used = new Set();
+      if (parsed && Array.isArray(parsed.clusters)) {
+        for (const cl of parsed.clusters) {
+          const members = (Array.isArray(cl && cl.members) ? cl.members : [])
+            .map((m) => Number(m))
+            .filter((m) => Number.isInteger(m) && m >= 0 && m < candidates.length && !used.has(m));
+          if (!members.length) continue;
+          for (const m of members) used.add(m);
+          clusters.push({ members: members.map((m) => candidates[m]) });
+        }
+      }
+      for (let i = 0; i < candidates.length; i++) {
+        if (!used.has(i)) clusters.push({ members: [candidates[i]] });
+      }
+      return clusters;
     }
 
-    async function stageSummarize(source, candidates) {
-      // 模型摘要：批量 → [{title, summary}]（summaryLanguage）
-      return [];
+    function pickMain(members) {
+      const weights = state.preferences.sourceWeights || {};
+      let best = members[0];
+      for (const m of members) {
+        const w1 = weights[m.source.id] || 1;
+        const w2 = weights[best.source.id] || 1;
+        if (w1 > w2) { best = m; continue; }
+        if (w1 === w2) {
+          const t1 = m.item.publishedAt ? Date.parse(m.item.publishedAt) : NaN;
+          const t2 = best.item.publishedAt ? Date.parse(best.item.publishedAt) : NaN;
+          if ((isNaN(t2) && !isNaN(t1)) || (!isNaN(t1) && !isNaN(t2) && t1 < t2)) best = m;
+        }
+      }
+      return best;
+    }
+
+    async function stageFineAndSummarize(cluster) {
+      const main = pickMain(cluster.members);
+      let content = null;
+      try {
+        const program = await loadTemplateAndScript(main.source);
+        const out = await runSourceScript(program, { mode: 'content', config: main.source, item: main.item });
+        if (out && out.text) content = out.text;
+      } catch (err) {
+        console.error('[dsh-livefeed] fineSearch failed:', String(err && err.message || err));
+      }
+      const snippets = cluster.members.map((m) => (m.item.snippet || '')).filter(Boolean).join('\n');
+      const fallbackText = content || snippets;
+      if (!fallbackText) return null;
+      let title = main.item.title;
+      let summary = '';
+      if (content) {
+        try {
+          const system =
+            '你是资讯摘要助手。把给定内容压缩成 2-3 句「' + (state.config.summaryLanguage || 'zh-CN') +
+            '」摘要，并给出更准确的标题。只输出 JSON: {"title":"…","summary":"…"}';
+          const parsed = extractJson(await callModel(system, '标题: ' + main.item.title + '\n内容:\n' + content.slice(0, 6000), 1500));
+          if (parsed && parsed.title && parsed.summary) { title = parsed.title; summary = parsed.summary; }
+          else summary = fallbackText.slice(0, 300);
+        } catch (_) {
+          summary = fallbackText.slice(0, 300);
+        }
+      } else {
+        summary = fallbackText.slice(0, 300);
+      }
+      return {
+        title,
+        summary,
+        url: main.item.url,
+        sourceName: main.source.name,
+        publishedAt: main.item.publishedAt,
+        relatedUrls: cluster.members
+          .filter((m) => m.item.url !== main.item.url)
+          .map((m) => ({ url: m.item.url, sourceName: m.source.name })),
+      };
+    }
+
+    async function stageLand(cards) {
+      const newCards = [];
+      for (const card of cards) {
+        if (!card || !card.url) continue;
+        const key = normalizeUrl(card.url);
+        if (state.seenUrls.has(key)) continue;
+        state.seenUrls.add(key);
+        const full = {
+          id: 'c' + state.tick + '-' + newCards.length + '-' + Math.random().toString(36).slice(2, 8),
+          title: card.title,
+          summary: card.summary,
+          url: card.url,
+          sourceName: card.sourceName || '',
+          publishedAt: card.publishedAt,
+          relatedUrls: card.relatedUrls || [],
+          read: false,
+          feedback: null,
+          isNew: true,
+          createdAt: Date.now(),
+        };
+        newCards.push(full);
+        state.cards.push(full);
+      }
+      // 有界：裁剪最老的「已读且非不感兴趣」卡片（仅入归档）
+      const bound = (state.config.maxCards || DEFAULT_MAX_CARDS) * 3;
+      if (state.cards.length > bound) {
+        const removable = state.cards.filter((c) => c.read && c.feedback !== 'dislike');
+        let over = state.cards.length - bound;
+        for (const r of removable) {
+          if (over <= 0) break;
+          const idx = state.cards.indexOf(r);
+          if (idx >= 0) { state.cards.splice(idx, 1); over--; }
+        }
+      }
+      // 归档（有界滚动）
+      for (const c of newCards) {
+        state.archive.push({ id: c.id, title: c.title, url: c.url, summary: c.summary, sourceName: c.sourceName, publishedAt: c.publishedAt, createdAt: c.createdAt });
+      }
+      await saveArchive();
+      return newCards;
+    }
+
+    async function stageRules() {
+      if (!state.feedbackQueue.length) return;
+      const recent = state.feedbackQueue;
+      state.feedbackQueue = [];
+      try {
+        const system =
+          '你是过滤规则维护助手。根据用户最近标记的「不感兴趣」内容更新规则文档。' +
+          '规则只允许增加负面规则（block / semanticNotes），禁止推断用户的正向偏好（防止信息茧房）。' +
+          '只输出 JSON: {"block":["关键词","…"],"semanticNotes":"一句话"}。block 是合并去重后的完整列表（含原有条目），semanticNotes 是更新后的完整文本。';
+        const user =
+          '当前规则: ' + JSON.stringify({ block: state.preferences.block, semanticNotes: state.preferences.semanticNotes }) +
+          '\n新增不感兴趣: ' + JSON.stringify(recent.map((r) => r.title));
+        const parsed = extractJson(await callModel(system, user, 1500));
+        if (parsed && Array.isArray(parsed.block)) {
+          state.preferences.block = parsed.block.filter((b) => b && String(b).trim()).map((b) => String(b).trim());
+          state.preferences.semanticNotes = String(parsed.semanticNotes || state.preferences.semanticNotes || '');
+          state.preferences.version = (state.preferences.version || 1) + 1;
+          state.preferences.updatedAt = new Date().toISOString();
+          await savePreferences();
+        }
+      } catch (err) {
+        console.error('[dsh-livefeed] rules update failed:', String(err && err.message || err));
+      }
+    }
+
+    // ══ 规则重训（抽样归档）══
+    async function runRerunRules() {
+      if (state.running) return;
+      state.running = true;
+      try {
+        const sample = state.archive.filter((x) => x.feedback === 'dislike').slice(-30).map((d) => d.title);
+        const system =
+          '你是过滤规则维护助手。基于用户历史「不感兴趣」样本重写规则。只允许负面规则（block / semanticNotes），禁止推断正向偏好。' +
+          '只输出 JSON: {"block":["关键词","…"],"semanticNotes":"一句话"}。';
+        const parsed = extractJson(await callModel(system, '不感兴趣样本: ' + JSON.stringify(sample), 1500));
+        if (parsed && Array.isArray(parsed.block)) {
+          state.preferences.block = parsed.block.map((b) => String(b).trim()).filter(Boolean);
+          state.preferences.semanticNotes = String(parsed.semanticNotes || '');
+          state.preferences.version = (state.preferences.version || 1) + 1;
+          state.preferences.updatedAt = new Date().toISOString();
+          await savePreferences();
+        }
+      } catch (err) {
+        console.error('[dsh-livefeed] rerun rules failed:', String(err && err.message || err));
+      } finally {
+        state.running = false;
+      }
+    }
+
+    // ══ 持久化 ══
+    async function saveState() {
+      const panelCards = state.cards.filter((c) => !c.read || c.feedback === 'dislike');
+      await fsWrite(STATE_FILE, JSON.stringify({
+        cards: panelCards,
+        exemptUrls: Array.from(state.exemptUrls),
+        feedbackQueue: state.feedbackQueue.slice(-FEEDBACK_WINDOW),
+      }, null, 2));
+    }
+    async function saveConfig() {
+      await fsWrite(CONFIG_FILE, JSON.stringify(state.config, null, 2));
+    }
+    async function savePreferences() {
+      await fsWrite(PREFERENCES_FILE, JSON.stringify(state.preferences, null, 2));
+    }
+    async function saveArchive() {
+      const max = state.config.archiveMaxEntries || DEFAULT_ARCHIVE_MAX;
+      if (state.archive.length > max) state.archive = state.archive.slice(-max);
+      await fsWrite(HISTORY_FILE, state.archive.map((x) => JSON.stringify(x)).join('\n'));
+    }
+
+    async function loadAll() {
+      const cfgText = await fsRead(CONFIG_FILE);
+      state.config = mergeConfig(defaultConfig(), parseJson(cfgText, null));
+      state.preferences = parseJson(await fsRead(PREFERENCES_FILE), defaultPreferences());
+      if (!Array.isArray(state.preferences.block)) state.preferences.block = [];
+      if (!Array.isArray(state.preferences.prefer)) state.preferences.prefer = [];
+      if (!state.preferences.sourceWeights || typeof state.preferences.sourceWeights !== 'object') state.preferences.sourceWeights = {};
+      const st = parseJson(await fsRead(STATE_FILE), null);
+      state.cards = (st && Array.isArray(st.cards) ? st.cards : [])
+        .filter((c) => c && c.url && (!c.read || c.feedback === 'dislike'))
+        .map((c) => Object.assign({ relatedUrls: [], isNew: false, createdAt: Date.now() }, c, { isNew: false }));
+      state.exemptUrls = new Set(st && Array.isArray(st.exemptUrls) ? st.exemptUrls : []);
+      state.feedbackQueue = st && Array.isArray(st.feedbackQueue) ? st.feedbackQueue.slice(-FEEDBACK_WINDOW) : [];
+      state.archive = [];
+      state.seenUrls = new Set();
+      const histText = await fsRead(HISTORY_FILE);
+      if (histText) {
+        for (const line of histText.split('\n')) {
+          const t = line.trim();
+          if (!t) continue;
+          const item = parseJson(t, null);
+          if (!item || !item.url) continue;
+          state.archive.push(item);
+          state.seenUrls.add(normalizeUrl(item.url));
+        }
+      }
+      for (const c of state.cards) state.seenUrls.add(normalizeUrl(c.url));
     }
 
     // ══ 主周期 ══
     async function runCycle() {
-      if (state.running) return; // 单飞
+      if (disposed || state.running) return;
+      if (state.paused) return;
       state.running = true;
       state.sourceErrors = [];
+      state.cycleStats = null;
+      state.retrying = 0;
       try {
-        // TODO(评审后)：装载配置/模板/各源脚本 → 逐源执行 5 阶段 →
-        //   去重（recentUrls）→ 落 state.cards（上限 maxCards）→ 更新状态
+        await loadAll();
+        const stats = { scanned: 0, selected: 0, filtered: 0 };
+        const candidates = [];
+        for (const source of state.config.sources || []) {
+          if (!source || !source.enabled) continue;
+          try {
+            const items = await stageCoarse(source);
+            stats.scanned += items.length;
+            const picked = await stageJudge(source, items);
+            stats.filtered += items.length - picked.length;
+            stats.selected += picked.length;
+            for (const it of picked) candidates.push({ item: it, source });
+          } catch (err) {
+            state.sourceErrors.push({ sourceId: String(source.id || ''), message: String((err && err.message) || err) });
+            console.error('[dsh-livefeed] source failed:', source.id, err);
+          }
+        }
+        if (candidates.length) {
+          const clusters = await stageCluster(candidates);
+          const cards = [];
+          for (const cl of clusters) {
+            const card = await stageFineAndSummarize(cl);
+            if (card) cards.push(card);
+          }
+          await stageLand(cards);
+        }
+        await stageRules();
+        await saveState();
+        state.cycleStats = stats;
+        state.lastError = undefined;
+        state.lastRunAt = Date.now();
+        state.tick += 1;
       } catch (err) {
         state.lastError = String((err && err.message) || err);
         console.error('[dsh-livefeed] cycle failed:', err);
+        scheduleRetry();
       } finally {
         state.running = false;
-        state.lastRunAt = Date.now();
-        state.tick += 1;
       }
+    }
+
+    function scheduleRetry() {
+      if (disposed || state.paused) return;
+      if (state.retrying >= RETRY_MAX) { state.retrying = 0; return; }
+      state.retrying += 1;
+      const delay = RETRY_BASE_MS * Math.pow(2, state.retrying - 1);
+      console.log('[dsh-livefeed] schedule retry', state.retrying, 'delay ms', delay);
+      ctx.timeout(() => {
+        if (!disposed) runCycle();
+      }, delay);
+    }
+
+    // ══ 调度器 ══
+    function intervalMs() {
+      const m = Number(state.config && state.config.intervalMinutes) || DEFAULT_INTERVAL_MIN;
+      return Math.max(1, m) * 60 * 1000;
+    }
+    function tick() {
+      if (disposed || state.paused || state.running) return;
+      if (state.lastRunAt !== undefined && Date.now() - state.lastRunAt < intervalMs()) return;
+      runCycle();
     }
 
     // ══ RPC（Package 私有，Client→Host）══
     harness.handle('dsh-livefeed/cards', async () => ({
-      cards: state.cards,
+      cards: state.cards.slice(-300).map((c) => ({
+        id: c.id, title: c.title, summary: c.summary, url: c.url,
+        sourceName: c.sourceName, publishedAt: c.publishedAt,
+        relatedUrls: c.relatedUrls || [],
+        isNew: !!c.isNew, read: !!c.read, feedback: c.feedback || null,
+      })),
       status: {
         running: state.running,
+        paused: state.paused,
+        retrying: state.retrying,
         lastRunAt: state.lastRunAt,
         lastError: state.lastError,
         sourceErrors: state.sourceErrors,
+        cycleStats: state.cycleStats,
+        tick: state.tick,
       },
+    }));
+
+    harness.handle('dsh-livefeed/config', async () => ({
+      config: state.config ? {
+        intervalMinutes: state.config.intervalMinutes,
+        maxCards: state.config.maxCards,
+        maxCandidatesPerSource: state.config.maxCandidatesPerSource,
+        summaryLanguage: state.config.summaryLanguage,
+        interests: state.config.interests || [],
+        blockWords: state.config.blockWords || [],
+        archiveMaxEntries: state.config.archiveMaxEntries,
+        model: state.config.model || null,
+        sources: state.config.sources || [],
+      } : null,
     }));
 
     harness.handle('dsh-livefeed/refresh', async () => {
       if (state.running) return { accepted: false };
-      runCycle(); // 异步触发，不阻塞
+      runCycle();
       return { accepted: true };
     });
 
-    // ══ 定时器（随 fiber 自动清理）══
-    const intervalMs = () => {
-      // TODO(评审后)：取 config.intervalMinutes，缺省 DEFAULT_INTERVAL_MS
-      return DEFAULT_INTERVAL_MS;
-    };
-    ctx.effect(() => ctx.interval(runCycle, intervalMs()));
-    ctx.timeout(runCycle, 15 * 1000); // 启动后先跑第一轮
+    harness.handle('dsh-livefeed/mark', async (args) => {
+      const a = args || {};
+      const card = state.cards.find((c) => c.id === a.cardId);
+      if (card) {
+        if (a.read === true) { card.read = true; card.isNew = false; }
+        if (a.feedback === 'dislike') {
+          if (card.feedback !== 'dislike') {
+            state.feedbackQueue.push({ title: card.title, url: card.url, ts: Date.now() });
+            if (state.feedbackQueue.length > FEEDBACK_WINDOW) state.feedbackQueue.shift();
+          }
+          card.feedback = 'dislike';
+          card.read = true;
+          card.isNew = false;
+        } else if (a.feedback === null) {
+          card.feedback = null;
+        }
+        const key = normalizeUrl(card.url);
+        const ae = state.archive.find((x) => normalizeUrl(x.url) === key);
+        if (ae) ae.feedback = card.feedback;
+        await saveState();
+        await saveArchive();
+      }
+      return { ok: true };
+    });
+
+    harness.handle('dsh-livefeed/mark-all-read', async () => {
+      let changed = false;
+      for (const c of state.cards) {
+        if (!c.read) { c.read = true; c.isNew = false; changed = true; }
+      }
+      if (changed) await saveState();
+      return { ok: true };
+    });
+
+    harness.handle('dsh-livefeed/set-paused', async (args) => {
+      state.paused = !!(args && args.paused);
+      return { ok: true, paused: state.paused };
+    });
+
+    harness.handle('dsh-livefeed/update-settings', async (args) => {
+      const a = args || {};
+      const cfg = state.config || defaultConfig();
+      if (typeof a.intervalMinutes === 'number' && a.intervalMinutes >= 1 && a.intervalMinutes <= 1440) cfg.intervalMinutes = Math.round(a.intervalMinutes);
+      if (a.model !== undefined) {
+        cfg.model = (a.model === null) ? null : {
+          provider: String((a.model && a.model.provider) || ''),
+          model: String((a.model && a.model.model) || ''),
+          reasoningEffort: (a.model && a.model.reasoningEffort) || undefined,
+        };
+      }
+      if (Array.isArray(a.interests)) cfg.interests = a.interests.map(String);
+      if (Array.isArray(a.blockWords)) cfg.blockWords = a.blockWords.map(String);
+      if (typeof a.archiveMaxEntries === 'number' && a.archiveMaxEntries >= 100) cfg.archiveMaxEntries = Math.round(a.archiveMaxEntries);
+      if (Array.isArray(a.sources)) {
+        for (const s of a.sources) {
+          const target = cfg.sources.find((x) => x.id === s.id);
+          if (target) {
+            if (typeof s.enabled === 'boolean') target.enabled = s.enabled;
+            if (typeof s.query === 'string') target.query = s.query;
+          }
+        }
+      }
+      state.config = cfg;
+      await saveConfig();
+      return { ok: true };
+    });
+
+    harness.handle('dsh-livefeed/update-words', async (args) => {
+      const a = args || {};
+      if (Array.isArray(a.interests)) state.config.interests = a.interests.map(String);
+      if (Array.isArray(a.blockWords)) state.config.blockWords = a.blockWords.map(String);
+      await saveConfig();
+      return { ok: true };
+    });
+
+    harness.handle('dsh-livefeed/model-catalog', async () => {
+      const providers = [];
+      try {
+        for (const p of ctx.llm.listProviders()) {
+          let models = [];
+          try { models = await ctx.llm.listModels(p.id); } catch (_) { models = []; }
+          providers.push({ id: p.id, name: p.name, models: models.map((m) => ({ id: m.id, name: m.name })) });
+        }
+      } catch (_) { /* 目录失败返回空 */ }
+      return { providers };
+    });
+
+    harness.handle('dsh-livefeed/rules', async () => ({ rules: state.preferences }));
+
+    harness.handle('dsh-livefeed/rerun-rules', async () => {
+      if (state.running) return { accepted: false };
+      runRerunRules();
+      return { accepted: true };
+    });
+
+    harness.handle('dsh-livefeed/filter-log', async () => ({
+      items: state.filterLog.slice(-FILTER_LOG_CAP).reverse(),
+    }));
+
+    harness.handle('dsh-livefeed/unblock', async (args) => {
+      const url = String((args && args.url) || '');
+      if (!url) return { ok: false };
+      const key = normalizeUrl(url);
+      state.exemptUrls.add(key);
+      state.seenUrls.add(key);
+      const existing = state.cards.find((c) => normalizeUrl(c.url) === key);
+      if (!existing) {
+        const log = state.filterLog.find((l) => normalizeUrl(l.url) === key);
+        state.cards.push({
+          id: 'u' + Date.now().toString(36),
+          title: log ? log.title : url,
+          summary: '（已撤销屏蔽，暂以标题展示；下一周期将正常采集正文）',
+          url,
+          sourceName: log ? log.sourceId : '',
+          read: false,
+          feedback: null,
+          isNew: true,
+          createdAt: Date.now(),
+        });
+      }
+      await saveState();
+      return { ok: true };
+    });
+
+    // ══ 启动：装载 + 定时器（随 fiber 自动清理）══
+    ctx.effect(() => {
+      loadAll();
+      const stopInterval = ctx.interval(tick, TICK_MS);
+      const stopBoot = ctx.timeout(() => { if (!disposed) runCycle(); }, 15 * 1000);
+      return () => {
+        disposed = true;
+        if (stopInterval) stopInterval();
+        if (stopBoot) stopBoot();
+      };
+    });
   },
 };

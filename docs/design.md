@@ -1,6 +1,6 @@
 # LiveFeed 设计文档
 
-> 状态：设计定稿 · 实现进行中（原型评审后完成 Host/Client 代码）
+> 状态：v1 实现完成（Host/Client 代码就绪，动态插件部署验证中）
 > 关联文档：[搜索源基类模板契约](source-contract.md) · [HTML 原型](../prototype/prototype.html)
 
 ## 1. 背景与目标

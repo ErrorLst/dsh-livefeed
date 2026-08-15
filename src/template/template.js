@@ -23,9 +23,19 @@ const DEFAULT_MAX_ITEMS = 15;     // 粗搜默认条目上限
 // 子类契约：coarseSearch 必选，fineSearch 可选（有默认实现）
 // ────────────────────────────────────────────────────────────────────────────
 async function coarseSearch(api) {
-  throw new Error(
-    '[dsh-livefeed] 源脚本未实现 coarseSearch(api)：请返回 [{title, url, snippet?, publishedAt?}]'
-  );
+  // 默认粗搜：通用 web.search 型（源脚本未实现且未配置 query 时抛错提示）
+  const cfg = await api.config();
+  const q = String((cfg && cfg.query) || '').trim();
+  if (!q) {
+    throw new Error('[dsh-livefeed] 未实现 coarseSearch 且源未配置 query');
+  }
+  const r = await searchWeb(api, q, (cfg && cfg.maxItems) || DEFAULT_MAX_ITEMS);
+  return r.map((s) => ({
+    title: s.title || s.url,
+    url: s.url,
+    snippet: s.snippet || '',
+    publishedAt: s.publishedAt || undefined,
+  }));
 }
 
 async function fineSearch(api, item) {
