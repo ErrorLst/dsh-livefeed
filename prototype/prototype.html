@@ -802,9 +802,12 @@ function groupHtml(label, count) {
 function findCard(id) { return CARDS.find((c) => c.id === id); }
 
 function renderCards() {
-  const unread = CARDS.filter((c) => !c.read);
+  // 三层分组：最新（本轮新到）→ 未读（之前）→ 已读
+  const latest = CARDS.filter((c) => !c.read && c.isNew);
+  const unread = CARDS.filter((c) => !c.read && !c.isNew);
   const read = CARDS.filter((c) => c.read);
   let html = '';
+  if (latest.length) html += groupHtml('最新', latest.length) + latest.map(cardHtml).join('');
   if (unread.length) html += groupHtml('未读', unread.length) + unread.map(cardHtml).join('');
   if (read.length) html += groupHtml('已读', read.length) + read.map(cardHtml).join('');
   scroll.innerHTML = html;
@@ -830,43 +833,64 @@ function setFeedback(id, fb) {
   renderCards();
 }
 
-/* 左滑 = 标记不感兴趣：拖过阈值松手 → 滑出动画 → 落库 */
+/* 左滑 = 标记不感兴趣：拖过阈值松手 → 滑出动画 → 落库
+   健壮性：仅响应左键；无按键的 move（指针捕获泄漏）自动复位，杜绝“没按也能拖”；
+   拖拽后抑制 click，杜绝误触打开。 */
 function bindCardInteractions() {
   document.querySelectorAll('.lf-card').forEach((card) => {
     const wrap = card.parentElement;
     const id = wrap.dataset.id;
-    let startX = 0, dx = 0, dragging = false, suppressed = false;
+    let startX = 0, startY = 0, dx = 0, moved = false, dragging = false;
+
+    function resetDrag() {
+      dragging = false;
+      card.classList.remove('dragging');
+      card.style.transform = '';
+    }
 
     card.addEventListener('pointerdown', (e) => {
       if (card.classList.contains('read')) return; // 已读卡片不可再滑
-      e.preventDefault(); // 阻止文本选择与浏览器原生链接拖拽
-      startX = e.clientX; dx = 0; dragging = false; suppressed = false;
+      if (e.button !== 0) return; // 仅响应左键
+      startX = e.clientX; startY = e.clientY;
+      dx = 0; moved = false; dragging = false;
       card.setPointerCapture(e.pointerId);
     });
+
     card.addEventListener('pointermove', (e) => {
+      if (e.buttons === 0) {
+        // 未按下却收到 move：指针捕获异常残留 → 复位，避免无按键拖拽
+        if (dragging || moved) resetDrag();
+        return;
+      }
       const mx = e.clientX - startX;
-      if (mx > 0 && !dragging) return;
-      if (!dragging && Math.abs(mx) < 6) return;
-      dragging = true;
-      suppressed = true;
-      card.classList.add('dragging');
+      const my = e.clientY - startY;
+      if (!moved && Math.abs(mx) < 6 && Math.abs(my) < 6) return;
+      moved = true;
+      e.preventDefault(); // 拖拽中阻止文本选择等默认行为
+      if (!dragging) { dragging = true; card.classList.add('dragging'); }
       dx = Math.max(-120, Math.min(0, mx));
       card.style.transform = `translateX(${dx}px)`;
     });
-    card.addEventListener('pointerup', () => {
-      card.classList.remove('dragging');
-      card.style.transform = '';
+
+    card.addEventListener('pointerup', (e) => {
+      try { card.releasePointerCapture(e.pointerId); } catch (_) { /* 已释放 */ }
       if (dragging) {
-        dragging = false;
-        if (dx <= -60) {
-          // 滑出动画完成后标记「不感兴趣」
+        const out = dx <= -60;
+        resetDrag();
+        if (out) {
           card.classList.add('swiped');
-          setTimeout(() => setFeedback(id, 'dislike'), 200);
+          setTimeout(() => setFeedback(id, 'dislike'), 200); // 滑出动画完成后落库
         }
       }
     });
+
+    card.addEventListener('pointercancel', resetDrag);
+    card.addEventListener('lostpointercapture', () => {
+      if (dragging) resetDrag(); // 捕获异常丢失时兜底复位
+    });
+
     card.addEventListener('click', (e) => {
-      if (suppressed) { suppressed = false; return; }
+      if (moved) { moved = false; e.preventDefault(); return; } // 拖拽后抑制点击
       e.preventDefault();
       markRead(id); // 原型模拟：打开原文 → 已读
     });
