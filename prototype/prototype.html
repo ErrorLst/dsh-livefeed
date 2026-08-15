@@ -280,13 +280,12 @@ body {
   color: var(--dsw-alias-label-tertiary); font-size: 13px;
 }
 
-/* ═══════════════ LiveFeed 悬浮面板 ═══════════════ */
+/* ═══════════════ LiveFeed 悬浮面板（无阴影，与 DSH 默认风格一致）═══════════════ */
 .lf-panel {
   position: fixed; top: 0; right: 0; bottom: 0; width: 340px;
   display: flex; flex-direction: column;
   background: var(--dsw-alias-bg-layer-1);
   border-left: 1px solid var(--dsw-alias-border-l1);
-  box-shadow: -8px 0 24px var(--dsw-alias-bg-mask-2);
   z-index: 100;
   transition: transform .18s ease;
 }
@@ -472,7 +471,6 @@ body {
 .lf-switch .lf-switch-track::after {
   content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
   border-radius: 50%; background: #fff;
-  box-shadow: 0 1px 2px var(--dsw-alias-bg-mask-2);
   transition: transform .15s;
 }
 .lf-switch input:checked + .lf-switch-track { background: var(--dsw-alias-state-business-primary); }
@@ -497,13 +495,12 @@ body {
 .lf-primarybtn:hover { background: var(--dsw-alias-button-primary-hover); }
 .lf-settings-note { margin: -6px 14px 8px; font-size: 10px; color: var(--dsw-alias-label-tertiary); line-height: 1.5; }
 
-/* 折叠态：单个浮动按钮 */
+/* 折叠态：单个浮动按钮（无阴影） */
 .lf-fab {
   position: fixed; top: 12px; right: 12px;
   width: 38px; height: 38px; border-radius: 10px;
   background: var(--dsw-alias-bg-layer-1);
   border: 1px solid var(--dsw-alias-border-l2);
-  box-shadow: 0 4px 16px var(--dsw-alias-bg-mask-2);
   color: var(--dsw-alias-state-business-primary);
   display: none; align-items: center; justify-content: center;
   cursor: pointer; z-index: 100;
