@@ -18,7 +18,8 @@ return {
     const CONFIG_FILE = CONFIG_DIR + '\\config.json';
     const TEMPLATE_FILE = CONFIG_DIR + '\\sources\\_template.js';
     const DEFAULT_INTERVAL_MS = 10 * 60 * 1000;
-    const RECENT_URL_CAP = 5; // 去重：保留最近 N 个周期的 URL 集
+    // 去重：seenUrls 持久集合（启动时从 state.json 卡片 + history.jsonl 归档构建），
+    // 新增条目 URL 归一化后比对，命中即丢弃（见 design.md §7.4）。
 
     // ══ 内置基类模板常量（与 src/template/template.js 保持同步）══
     // TODO(评审后)：从 src/template/template.js 内联为模板字符串。
@@ -31,7 +32,7 @@ return {
       lastRunAt: undefined,
       lastError: undefined,
       sourceErrors: [],   // [{sourceId, message}]
-      recentUrls: [],     // 最近周期的 URL 集合（数组，容量 RECENT_URL_CAP）
+      seenUrls: new Set(), // 持久去重集合（启动装载，周期追加）
       tick: 0,
     };
 

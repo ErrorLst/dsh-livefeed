@@ -41,7 +41,7 @@
 | 2 模型筛选 | 一次 `llm.stream`：system=筛选指令+interests+**规则文档（preferences.json）+最近反馈示例**；user=标题 JSON。输出 `{selected:[{index,reason}]}`，上限 `maxCandidatesPerSource`。先做**确定性过滤**（block 关键词直接丢弃、prefer 关键词提权），再做语义过滤 | 解析失败→跳过该源本轮 |
 | 3 精搜 | 对每个候选 `codeRuntime.run(mode:'content', item)` → `{text}`（≤8000 字符） | 失败且有 snippet → 降级为 snippet 摘要卡片；否则跳过 |
 | 4 模型摘要 | 候选**批量**一次 `llm.stream`：输出 `[{title,summary}]`（2–3 句，`summaryLanguage`） | 失败→保留粗搜标题+正文截断兜底出卡 |
-| 5 落库 | URL 去重（内存保留最近 5 周期 URL 集）；新卡 `isNew`；上限 `maxCards`；更新 `lastRunAt`/状态 | — |
+| 5 落库 | **URL 去重**：URL 归一化（去 fragment、host 小写、去尾斜杠）后与 **seenUrls 持久集合**比对（见 §7.4），命中即丢弃，保证新增内容不与「最新/未读/已读/不感兴趣」任何一层及历史已见内容重合；新卡 `isNew`；上限 `maxCards`；更新 `lastRunAt`/状态 | — |
 | 6 规则学习 | 若 `feedbackQueue` 有未消费的新标记：一次 `llm.stream` 增量更新规则文档（`preferences.json`）；标记积累超阈值或用户手动触发时改为**抽样重训** | 失败→保留旧规则并提示 |
 
 ### 模型调用
@@ -166,6 +166,8 @@
 | `preferences.json` | 规则文档（AI 维护，可人工编辑） | 增量学习/重训时写回 |
 
 **重启恢复规则**：插件启动时从 `state.json` 恢复面板——未读卡片与不感兴趣卡片原样显示；恢复的卡片 `isNew` 置为 false（落入「未读」组，而非「最新」），下一周期产生新的「最新」内容。`history.jsonl` 仅作归档，不参与面板恢复。
+
+**去重（seenUrls，持久）**：启动时从 `state.json` 的全部卡片与 `history.jsonl` 全量归档构建持久 URL 集合（内存 Set，随周期与标记变更追加）。新增条目的 URL 先归一化（去 fragment、host 小写、去尾斜杠）再比对，命中即丢弃——保证新增内容不与四层中的任何一层重合，也不与历史已见内容重复。不再使用「最近 N 周期内存集合」方案。
 
 写入均经 `fs.writeText`（原子）；失败降级为内存态并在面板状态行提示。
 
