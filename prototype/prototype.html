@@ -465,20 +465,25 @@ body {
 .lf-primarybtn:hover { background: var(--dsw-alias-button-primary-hover); }
 .lf-settings-note { margin: -6px 14px 8px; font-size: 10px; color: var(--dsw-alias-label-tertiary); line-height: 1.5; }
 
-/* 折叠窄条 */
-.lf-rail {
-  position: fixed; top: 0; right: 0; bottom: 0; width: 30px;
+/* 折叠态：单个浮动按钮 */
+.lf-fab {
+  position: fixed; top: 12px; right: 12px;
+  width: 38px; height: 38px; border-radius: 10px;
   background: var(--dsw-alias-bg-layer-1);
-  border-left: 1px solid var(--dsw-alias-border-l1);
-  box-shadow: -8px 0 24px var(--dsw-alias-bg-mask-2);
-  display: none; flex-direction: column; align-items: center; padding-top: 12px;
-  z-index: 100;
+  border: 1px solid var(--dsw-alias-border-l2);
+  box-shadow: 0 4px 16px var(--dsw-alias-bg-mask-2);
+  color: var(--dsw-alias-state-business-primary);
+  display: none; align-items: center; justify-content: center;
+  cursor: pointer; z-index: 100;
+  transition: background .12s;
 }
-.lf-rail.visible { display: flex; }
-.lf-rail .lf-iconbtn { margin-bottom: 10px; }
-.lf-rail .lf-rail-title {
-  writing-mode: vertical-rl; font-size: 11px; color: var(--dsw-alias-label-tertiary);
-  letter-spacing: .2em; user-select: none;
+.lf-fab.visible { display: flex; }
+.lf-fab:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.lf-fab svg { width: 16px; height: 16px; }
+.lf-fab .lf-fab-dot {
+  position: absolute; top: 6px; right: 6px; width: 7px; height: 7px;
+  border-radius: 50%; background: var(--dsw-alias-state-success-primary);
+  border: 1.5px solid var(--dsw-alias-bg-layer-1);
 }
 
 /* ═══════════════ 原型调试工具条（仅原型内使用）═══════════════ */
@@ -637,13 +642,11 @@ body {
   </div>
 </aside>
 
-<!-- ══ 折叠窄条 ══ -->
-<div class="lf-rail" id="rail">
-  <button class="lf-iconbtn" id="btnExpand" title="展开面板" aria-label="展开面板">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
-  </button>
-  <span class="lf-rail-title">实时讯息</span>
-</div>
+<!-- ══ 折叠态：单个浮动按钮 ══ -->
+<button class="lf-fab" id="fab" title="展开实时讯息" aria-label="展开实时讯息">
+  <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z" fill="currentColor"/></svg>
+  <span class="lf-fab-dot" id="fabDot" title="有新内容"></span>
+</button>
 
 <!-- ══ 原型调试工具条 ══ -->
 <div class="proto-bar">
@@ -700,7 +703,7 @@ const SOURCE_ERRORS = [
 
 /* ══ DOM ══ */
 const panel = document.getElementById('panel');
-const rail = document.getElementById('rail');
+const fab = document.getElementById('fab');
 const mainBody = document.getElementById('mainBody');
 const settingsBody = document.getElementById('settingsBody');
 const headerTitle = document.getElementById('headerTitle');
@@ -709,7 +712,6 @@ const statusText = document.getElementById('statusText');
 const scroll = document.getElementById('scroll');
 const btnRefresh = document.getElementById('btnRefresh');
 const btnCollapse = document.getElementById('btnCollapse');
-const btnExpand = document.getElementById('btnExpand');
 const btnSettings = document.getElementById('btnSettings');
 const btnSave = document.getElementById('btnSave');
 const btnReset = document.getElementById('btnReset');
@@ -781,7 +783,7 @@ function simulateRefresh() {
 function setCollapsed(value) {
   collapsed = value;
   panel.classList.toggle('hidden', value);
-  rail.classList.toggle('visible', value);
+  fab.classList.toggle('visible', value);
 }
 
 /* ══ 设置视图 ══ */
@@ -826,7 +828,7 @@ function renderSourceRows() {
 /* ══ 事件 ══ */
 btnRefresh.addEventListener('click', simulateRefresh);
 btnCollapse.addEventListener('click', () => setCollapsed(true));
-btnExpand.addEventListener('click', () => setCollapsed(false));
+fab.addEventListener('click', () => setCollapsed(false));
 document.getElementById('btnTogglePanel').addEventListener('click', () => setCollapsed(!collapsed));
 btnSettings.addEventListener('click', () => setSettingsOpen(!settingsOpen));
 document.querySelectorAll('.proto-bar button[data-state]').forEach((b) =>

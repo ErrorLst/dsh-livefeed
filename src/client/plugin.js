@@ -26,7 +26,7 @@ return {
       //    刷新间隔（分钟）、搜索源开关列表
       //  - 卡片：<a href={card.url} target="_blank" rel="noreferrer">
       //      title(2行截断) + summary(3行截断) + 源标签 + 时间 + isNew 徽标
-      //  - 空态/加载态/错误态/折叠窄条（对应 prototype 的 4 种预览状态）
+      //  - 空态/加载态/错误态/折叠浮动按钮（对应 prototype 的预览状态）
       return React.createElement('div', { 'data-livefeed': 'panel' }, 'LiveFeed Panel');
     }
 
