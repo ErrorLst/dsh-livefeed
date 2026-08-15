@@ -328,7 +328,14 @@ body {
 .lf-status[data-phase="error"] .lf-dot { background: var(--dsw-alias-state-error-primary); }
 .lf-status[data-phase="error"] { color: var(--dsw-alias-state-error-primary); }
 @keyframes lf-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
-.lf-status .lf-status-text { overflow: hidden; text-overflow: ellipsis; }
+.lf-status .lf-status-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.lf-mark-all {
+  flex: none; margin-left: auto; border: none; background: none;
+  color: var(--dsw-alias-state-business-primary); font-size: 11px;
+  padding: 2px 6px; border-radius: 4px; cursor: pointer; white-space: nowrap;
+  transition: background .12s;
+}
+.lf-mark-all:hover { background: var(--dsw-alias-interactive-bg-hover); }
 
 /* 列表 */
 .lf-scroll { flex: 1; overflow-y: auto; padding: 8px; }
@@ -598,6 +605,7 @@ body {
     <div class="lf-status" id="status" data-phase="idle">
       <span class="lf-dot"></span>
       <span class="lf-status-text" id="statusText">上次刷新 12:34 · 3 个源正常</span>
+      <button class="lf-mark-all" id="btnMarkAll" title="将所有未读标记为已读">全部已读</button>
     </div>
     <div class="lf-scroll" id="scroll"></div>
   </div>
@@ -774,6 +782,7 @@ const btnSettings = document.getElementById('btnSettings');
 const btnSave = document.getElementById('btnSave');
 const btnReset = document.getElementById('btnReset');
 const btnTheme = document.getElementById('btnTheme');
+const btnMarkAll = document.getElementById('btnMarkAll');
 
 let collapsed = false;
 let currentState = 'cards';
@@ -1034,6 +1043,16 @@ function renderSourceRows() {
 
 /* ══ 事件 ══ */
 btnRefresh.addEventListener('click', simulateRefresh);
+btnMarkAll.addEventListener('click', () => {
+  let changed = false;
+  CARDS.forEach((c) => {
+    if (!c.read) { c.read = true; c.isNew = false; changed = true; }
+  });
+  if (!changed) return;
+  renderCards();
+  statusText.textContent = '已全部标记已读 ✓';
+  setTimeout(() => setPanelState('cards'), 2600);
+});
 btnCollapse.addEventListener('click', () => setCollapsed(true));
 fab.addEventListener('click', () => setCollapsed(false));
 document.getElementById('btnTogglePanel').addEventListener('click', () => setCollapsed(!collapsed));

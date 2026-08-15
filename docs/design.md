@@ -99,6 +99,7 @@
 | `dsh-livefeed/mark` | `{ cardId, read?, feedback?: 'dislike' }` | `{ ok }`（写 `state.json`：已读 / 不感兴趣；仅支持负面反馈，防信息茧房） |
 | `dsh-livefeed/rules` | — | `{ rules }`（当前规则文档 `preferences.json`） |
 | `dsh-livefeed/rerun-rules` | — | `{ accepted }`（触发一次规则重训，运行中则幂等拒绝） |
+| `dsh-livefeed/mark-all-read` | — | `{ ok }`（全部未读（含最新）置为已读，写 `state.json`；不感兴趣组不受影响） |
 
 ### 6.1 面板设置
 
@@ -117,6 +118,7 @@
 - 每张卡片有 `read: boolean`；点击卡片（打开原文）后自动置为已读（Client 在 `<a>` 的 click 中先调 `dsh-livefeed/mark` 再放行新标签页）。
 - 面板列表**四层分组**（原型已验证）：**最新**（本轮新到，`isNew`）→ **未读**（之前周期的未读）→ **已读** → **不感兴趣**（`feedback==='dislike'`，可随时浏览回顾）；`isNew` 徽标仅「最新」组显示，已读卡片标题降饱和。
 - 每个分组头部可点击**折叠/展开**（折叠状态为页面级内存态，不持久化）。
+- 状态行右侧提供「**全部已读**」按钮：一键将所有未读（含最新）置为已读（`dsh-livefeed/mark-all-read`）；不感兴趣组不受影响。
 
 ### 7.2 用户反馈（左滑）
 
@@ -156,12 +158,14 @@
 
 ### 7.4 持久化文件（dsh-livefeed 配置目录下）
 
-| 文件 | 说明 |
-| --- | --- |
-| `config.json` | 原有配置（间隔/模型/源） |
-| `state.json` | 卡片状态（read/feedback）+ feedbackQueue |
-| `history.jsonl` | 全量归档，追加式，每行一条 |
-| `preferences.json` | 规则文档（AI 维护，可人工编辑） |
+| 文件 | 内容 | 说明 |
+| --- | --- | --- |
+| `config.json` | 间隔/模型/兴趣/搜索源 | 面板设置保存时写回 |
+| `state.json` | **面板数据**：所有**未读**（最新+未读组）与**不感兴趣**卡片的完整内容（id/title/summary/url/sourceName/publishedAt/createdAt/read/feedback）+ feedbackQueue | 每次周期落库与标记变更时写回；**已读且非不感兴趣的卡片不保存在此**（仅归档） |
+| `history.jsonl` | 全量归档：每周期所有条目 + 最终标记，追加式 | 供规则重训抽样；面板不直接依赖 |
+| `preferences.json` | 规则文档（AI 维护，可人工编辑） | 增量学习/重训时写回 |
+
+**重启恢复规则**：插件启动时从 `state.json` 恢复面板——未读卡片与不感兴趣卡片原样显示；恢复的卡片 `isNew` 置为 false（落入「未读」组，而非「最新」），下一周期产生新的「最新」内容。`history.jsonl` 仅作归档，不参与面板恢复。
 
 写入均经 `fs.writeText`（原子）；失败降级为内存态并在面板状态行提示。
 
