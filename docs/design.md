@@ -96,7 +96,7 @@
 | `livefeed/refresh` | — | `{ accepted: boolean }`（运行中则幂等拒绝） |
 | `livefeed/model-catalog` | — | `{ providers: [{id, name, models: [{id, name, efforts: [{id, name}]}]}] }`（面板「模型选择」级联数据源，来自 `llm.listProviders()/listModels()/resolveModelInfo()`） |
 | `livefeed/update-settings` | `{ intervalMinutes?, model?, sources?: [{id, enabled}] }` | `{ ok: boolean, error? }`（增量合并写回 `config.json`，下一周期生效） |
-| `livefeed/mark` | `{ cardId, read?, feedback? }` | `{ ok }`（写 `state.json`：已读/感兴趣/不感兴趣） |
+| `livefeed/mark` | `{ cardId, read?, feedback?: 'dislike' }` | `{ ok }`（写 `state.json`：已读 / 不感兴趣；仅支持负面反馈，防信息茧房） |
 | `livefeed/rules` | — | `{ rules }`（当前规则文档 `preferences.json`） |
 | `livefeed/rerun-rules` | — | `{ accepted }`（触发一次规则重训，运行中则幂等拒绝） |
 
@@ -119,7 +119,9 @@
 
 ### 7.2 用户反馈（左滑）
 
-- 卡片**左滑**露出「感兴趣 / 不感兴趣」两个按钮（原型已验证手势：拖拽 ≥42px 松手即吸附露出）；标记后卡片视为已处理（进入「已读」组）并显示反馈标签。
+- **唯一反馈动作：卡片左滑 = 标记「不感兴趣」**（原型已验证：拖过阈值松手，卡片滑出动画后落库）。拖拽过程中卡片右侧露出红色「不感兴趣」提示条。
+- **刻意不记录「感兴趣」**：正向偏好由用户显式配置的 `config.interests` 表达，模型只学习负面反馈（`block`），避免模型自行推断正向偏好而制造**信息茧房**。
+- 标记后卡片视为已处理（进入「已读」组）并显示「不感兴趣」标签。
 - 反馈持久化：`state.json` 保存每张卡片的状态；`feedbackQueue`（有界，最近 50 条）供规则学习消费。
 
 ### 7.3 过滤规则学习（分层架构）
@@ -129,10 +131,10 @@
 | 层 | 文件 | 作用 | 进入每周期提示词 |
 | --- | --- | --- | --- |
 | 全量归档 | `history.jsonl` | 所有条目+标记，追加式 | 否（仅重训时抽样读取） |
-| 反馈窗口 | `state.json` 内 `feedbackQueue` | 最近 50 条已标记条目 | 是（有界） |
+| 反馈窗口 | `state.json` 内 `feedbackQueue` | 最近 50 条「不感兴趣」标记 | 是（有界） |
 | 规则文档 | `preferences.json` | AI 维护的结构化规则 | 是（紧凑） |
 
-规则文档结构（示意）：
+规则文档结构（示意；`prefer` 仅来自用户显式配置的 interests，**不由反馈学习**，`block` 由「不感兴趣」反馈学习）：
 
 ```json
 {
@@ -146,9 +148,9 @@
 ```
 
 - **确定性过滤（代码层）**：`block` 关键词命中直接丢弃（零模型成本）；`prefer` 命中提升排序。
-- **语义过滤（模型层）**：阶段 2 筛选提示词 = interests + 规则文档 + 最近反馈示例（标题+标记），输出格式不变。
-- **增量学习**：每周期末尾，`feedbackQueue` 有未消费标记时，一次 llm 调用：输入=当前规则+新增标记 → 输出=更新后规则（增量合并、版本号+1），写回 `preferences.json`。
-- **规则重训（防漂移）**：标记积累超阈值（默认 200 条）或用户手动触发（设置页「立即重新学习」）时，从 `history.jsonl` 抽样（每类各约 30 条）重写规则。
+- **语义过滤（模型层）**：阶段 2 筛选提示词 = interests + 规则文档 + 最近反馈示例（标题+「不感兴趣」标记），输出格式不变。
+- **增量学习**：每周期末尾，`feedbackQueue` 有未消费标记时，一次 llm 调用：输入=当前规则+新增「不感兴趣」标记 → 输出=更新后规则（**只允许向 `block`/`semanticNotes` 增加负面规则**，不得推断正向偏好，防止信息茧房；版本号+1），写回 `preferences.json`。
+- **规则重训（防漂移）**：标记积累超阈值（默认 200 条）或用户手动触发（设置页「立即重新学习」）时，从 `history.jsonl` 抽样重写规则，同样仅限负面规则。
 
 ### 7.4 持久化文件（livefeed 配置目录下）
 
