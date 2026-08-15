@@ -901,8 +901,7 @@ function bindCardInteractions() {
     }
 
     card.addEventListener('pointerdown', (e) => {
-      // 普通已读卡片不可滑；「不感兴趣」卡片可滑（左滑 = 移除标记）
-      if (card.classList.contains('read') && !card.classList.contains('dislike')) return;
+      // 所有卡片均可左滑：未读/已读 → 标记不感兴趣；不感兴趣 → 移除标记
       if (e.button !== 0) return; // 仅响应左键
       startX = e.clientX; startY = e.clientY;
       dx = 0; moved = false; dragging = false;
