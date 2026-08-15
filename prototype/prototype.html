@@ -370,13 +370,12 @@ body {
   transition: background .12s, border-color .12s, transform .18s ease;
   touch-action: pan-y; user-select: none; cursor: pointer;
 }
-.lf-card:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.lf-card:hover { background: var(--dsw-alias-interactive-bg-hover-solid); }
 .lf-card.swiped { transform: translateX(-120%); opacity: 0; }
 .lf-card.dragging { transition: none; }
 .lf-card.read .lf-card-title { color: var(--dsw-alias-label-secondary); }
 .lf-card.read .lf-card-summary { opacity: .75; }
 .lf-feedback-tag { font-size: 10px; padding: 1px 6px; border-radius: 4px; font-weight: 600; }
-.lf-feedback-tag.like { background: var(--dsw-alias-state-success-tertiary); color: var(--dsw-alias-state-success-primary); }
 .lf-feedback-tag.dislike { background: var(--dsw-alias-interactive-bg-hover-danger); color: var(--dsw-alias-state-error-primary); }
 .lf-card-title-row { display: flex; align-items: flex-start; gap: 6px; }
 .lf-card-title {
@@ -839,6 +838,7 @@ function bindCardInteractions() {
     let startX = 0, dx = 0, dragging = false, suppressed = false;
 
     card.addEventListener('pointerdown', (e) => {
+      if (card.classList.contains('read')) return; // 已读卡片不可再滑
       startX = e.clientX; dx = 0; dragging = false; suppressed = false;
       card.setPointerCapture(e.pointerId);
     });
