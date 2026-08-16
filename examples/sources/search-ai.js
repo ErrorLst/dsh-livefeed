@@ -3,7 +3,7 @@
  * - fineSearch：不实现，使用基类默认实现（抓取 item.url 提取正文）
  */
 async function coarseSearch(api) {
-  const cfg = api.config();
+  const cfg = api.config(null);
   const r = await searchWeb(api, cfg.query, cfg.maxItems || 15);
   return r.map((s) => ({
     title: s.title || s.url,

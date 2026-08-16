@@ -24,11 +24,13 @@ Host 将模板与源脚本拼接（`program = 模板 + "\n" + 源脚本`）后�
 
 ## 3. `api` 绑定（Host 注入，参数/返回值均为 JSON）
 
+> ⚠️ **传参约定**：codeRuntime 的绑定调用必须**恰好传一个 JSON 参数**（无参调用会被判定为 `undefined` 而拒绝，报 `binding arguments must be lossless JSON`）。无参语义的接口请显式传 `null`，如 `api.config(null)`。
+
 | 方法 | 说明 |
 | --- | --- |
-| `api.mode()` | `'titles' \| 'content'`，由调度器调用 |
-| `api.config()` | 该 source 的配置对象（`id/name/query/maxItems/…`） |
-| `api.item()` | content 模式下 Host 传入的候选条目（粗搜结果之一） |
+| `api.mode(null)` | `'titles' \| 'content'`，由调度器调用 |
+| `api.config(null)` | 该 source 的配置对象（`id/name/query/maxItems/…`） |
+| `api.item(null)` | content 模式下 Host 传入的候选条目（粗搜结果之一） |
 | `api.search({ query, maxResults? })` | 网络搜索 → `{ sources: [{url, title?, snippet?, publishedAt?}] }`（DeepSeek 搜索服务） |
 | `api.fetchContent({ url })` | 抓取页面 → `{ url, statusCode, body: {kind:'html'\|'text', content}, truncated }`（内部：`web.fetch` 优先，`curl` 回退，代理自动生效） |
 
@@ -56,7 +58,7 @@ Host 将模板与源脚本拼接（`program = 模板 + "\n" + 源脚本`）后�
 // sources/linuxdo.js
 // 粗搜：Discourse JSON 搜索接口 → 话题标题 + 链接
 async function coarseSearch(api) {
-  const q = encodeURIComponent(api.config().query || '');
+  const q = encodeURIComponent(api.config(null).query || '');
   const page = await fetchPage(api, `https://linux.do/search.json?q=${q}&order=latest`);
   const data = JSON.parse(page.body.content);
   return (data.topics || []).map((t) => ({

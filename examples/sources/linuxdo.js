@@ -3,7 +3,7 @@
  * - fineSearch：话题 JSON 接口 → 首帖正文 cooked(HTML) 转文本（精搜）
  */
 async function coarseSearch(api) {
-  const cfg = api.config();
+  const cfg = api.config(null);
   const q = encodeURIComponent(cfg.query || '');
   const page = await fetchPage(api, `https://linux.do/search.json?q=${q}&order=latest`);
   const data = JSON.parse(page.body.content);

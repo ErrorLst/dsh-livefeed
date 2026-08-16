@@ -8,7 +8,7 @@
  *   接口取正文（避免默认实现抓整页评论区）；外部文章走基类默认实现。
  */
 async function coarseSearch(api) {
-  const cfg = api.config();
+  const cfg = api.config(null);
   const q = encodeURIComponent(cfg.query || '');
   const numeric = cfg.minPoints
     ? '&numericFilters=' + encodeURIComponent('points>=' + cfg.minPoints)

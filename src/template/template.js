@@ -24,7 +24,7 @@ const DEFAULT_MAX_ITEMS = 15;     // 粗搜默认条目上限
 // ────────────────────────────────────────────────────────────────────────────
 async function coarseSearch(api) {
   // 默认粗搜：通用 web.search 型（源脚本未实现且未配置 query 时抛错提示）
-  const cfg = await api.config();
+  const cfg = await api.config(null);
   const q = String((cfg && cfg.query) || '').trim();
   if (!q) {
     throw new Error('[dsh-livefeed] 未实现 coarseSearch 且源未配置 query');
@@ -144,12 +144,12 @@ function _normalizeContent(out) {
 // 调度器（模板内置；源脚本无需关心）
 // ────────────────────────────────────────────────────────────────────────────
 async function _dshLivefeedDispatcher() {
-  const mode = await api.mode();
+  const mode = await api.mode(null);
   if (mode === 'titles') {
-    return _normalizeTitles(await coarseSearch(api), await api.config());
+    return _normalizeTitles(await coarseSearch(api), await api.config(null));
   }
   if (mode === 'content') {
-    const item = await api.item();
+    const item = await api.item(null);
     return _normalizeContent(await fineSearch(api, item));
   }
   throw new Error('[dsh-livefeed] 未知模式: ' + String(mode));
