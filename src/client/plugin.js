@@ -498,7 +498,7 @@ return {
       React.useEffect(() => {
         refresh();
         let stop = null;
-        try { stop = ctx.interval(refresh, 15000); } catch (_) { /* ignore */ }
+        try { stop = ctx.interval(refresh, 5000); } catch (_) { /* ignore */ }
         return () => { if (stop) stop(); };
       }, [refresh]);
 
@@ -531,9 +531,13 @@ return {
         { id: 'blocked', label: '屏蔽', count: filterLog.length },
       ];
 
+      const STAGE_LABELS = { coarse: '粗搜', judge: '筛选', cluster: '聚类', fine: '精读摘要', land: '落卡', translate: '翻译屏蔽标题', rules: '规则学习', done: '完成' };
+      const prog = status.progress || {};
+      const runningText = '采集中 · ' + (STAGE_LABELS[prog.stage] || '整理') + (prog.detail ? ' · ' + prog.detail : '');
+
       const statusText = status.paused
         ? '已暂停 · 上次刷新 ' + (status.lastRunAt ? fmtTime(status.lastRunAt) : '—')
-        : (status.running ? '正在采集与整理…'
+        : (status.running ? runningText
           : (status.lastError ? '上次周期失败 · 重试中(' + (status.retrying || 1) + '/2)'
             : '上次刷新 ' + (status.lastRunAt ? fmtTime(status.lastRunAt) : '—') + ' · ' +
               ((status.sourceErrors || []).length ? (status.sourceErrors.length + ' 个源出错') : (status.sourceErrors && cards.length ? '正常' : '待配置'))));
@@ -541,7 +545,7 @@ return {
       const statusTip =
         '<div class="tt-title">采集状态</div>' +
         '<div class="tt-row">上次刷新：' + (status.lastRunAt ? new Date(status.lastRunAt).toLocaleString() : '—') + '</div>' +
-        '<div class="tt-row">运行周期：' + (status.tick || 0) + ' · 状态：' + (status.paused ? '已暂停' : (status.running ? '采集中' : (status.lastError ? '出错' : '正常'))) + '</div>' +
+        '<div class="tt-row">运行周期：' + (status.tick || 0) + ' · 状态：' + (status.paused ? '已暂停' : (status.running ? '采集中 · ' + (STAGE_LABELS[prog.stage] || '整理') + (prog.detail ? ' · ' + prog.detail : '') : (status.lastError ? '出错' : '正常'))) + '</div>' +
         '<div class="tt-row">搜索源：' + ((status.sourceErrors || []).length ? '<span class="tt-err">' + status.sourceErrors.length + ' 出错</span>' : '<span class="tt-ok">正常</span>') + '</div>' +
         (status.lastError ? '<div class="tt-row tt-err">错误：' + status.lastError + '</div>' : '') +
         (status.sourceErrors || []).map((s) => '<div class="tt-row">· ' + s.sourceId + ' — ' + s.message + '</div>').join('');
