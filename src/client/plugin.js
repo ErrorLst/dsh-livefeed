@@ -862,7 +862,7 @@ return {
             sources.length ? sources.map((s) => h('div', { key: s.id, className: 'lf-source-row' + (toggles[s.id] === false ? ' lf-disabled' : '') },
               h('div', { className: 'lf-source-info' },
                 h('div', { className: 'lf-source-name' }, s.name || s.id),
-                h('div', { className: 'lf-source-id' }, s.id + ' · 查询：' + (s.query || '未设置')),
+                h('div', { className: 'lf-source-id' }, s.id + ' · 查询：' + (s.query || '全量抓取（无关键词）')),
               ),
               h('label', { className: 'lf-switch' },
                 h('input', { type: 'checkbox', checked: toggles[s.id] !== false, onChange: (e) => setToggles(Object.assign({}, toggles, { [s.id]: e.target.checked })) }),
