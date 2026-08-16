@@ -807,6 +807,12 @@ return {
           let payload = {};
           if (req.method === 'POST') {
             try { payload = JSON.parse(await readBody(req)) || {}; } catch (_) { payload = {}; }
+          } else if (req.method === 'GET' || req.method === 'HEAD') {
+            // GET 诊断：/api/dsh-livefeed?method=model-catalog —— 浏览器地址栏可直接打开验证
+            try {
+              const u = new URL(req.url || '/', 'http://local');
+              payload = { method: String(u.searchParams.get('method') || ''), args: {} };
+            } catch (_) { payload = {}; }
           }
           const method = String(payload.method || '');
           const handler = handlers[method];
