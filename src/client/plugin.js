@@ -84,12 +84,24 @@ return {
 .lf-scroll::-webkit-scrollbar-thumb { background: var(--dsw-alias-scrollbar-bg-l1); border-radius: 4px; }
 .lf-group {
   display: flex; align-items: center; gap: 4px;
+  width: 100%; border: none; background: none; text-align: left;
   padding: 6px 10px; margin: 2px 4px 0; border-radius: 6px;
   font-size: 11px; color: var(--dsw-alias-label-tertiary);
-  user-select: none;
+  user-select: none; cursor: pointer;
 }
-.lf-group .lf-group-label { flex: 1; }
+.lf-group:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.lf-group .lf-group-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lf-group .lf-group-count { font-size: 10px; }
+.lf-group .lf-group-chevron { flex: none; font-size: 10px; }
+.lf-group.lf-collapsed { opacity: .72; }
+.lf-src-err {
+  flex: none; padding: 4px 10px; font-size: 11px;
+  color: var(--dsw-alias-state-error-primary);
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.lf-src-err-item { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lf-card-wrap { position: relative; overflow: hidden; border-radius: 8px; }
 .lf-card-swipe {
   position: absolute; top: 0; right: 0; bottom: 0; width: 84px;
@@ -483,6 +495,8 @@ return {
       const [tab, setTab] = React.useState('unread');
       const [filterLog, setFilterLog] = React.useState([]);
       const [detail, setDetail] = React.useState(null); // 摘要弹窗当前卡片
+      const [collapsedCycles, setCollapsedCycles] = React.useState(null); // 折叠的刷新周期集合（null=默认：仅最新一轮展开）
+      const lastTickRef = React.useRef(null);
 
       const refresh = React.useCallback(async () => {
         try {
@@ -520,6 +534,14 @@ return {
       const phase = status.paused ? 'paused' : (status.running ? 'running' : (status.lastError ? 'error' : 'idle'));
       const stats = status.cycleStats;
 
+      // 刷新事件完成（tick 变化）后：折叠旧周期，仅展开最新一轮；用户可单独点击展开/折叠
+      React.useEffect(() => {
+        if (lastTickRef.current !== status.tick) {
+          lastTickRef.current = status.tick;
+          setCollapsedCycles(null);
+        }
+      }, [status.tick]);
+
       const latestCards = cards.filter((c) => !c.read && c.isNew);
       const unreadCards = cards.filter((c) => !c.read && !c.isNew);
       const readCards = cards.filter((c) => c.read && c.feedback !== 'dislike');
@@ -553,11 +575,47 @@ return {
         '<div class="tt-title">本次周期统计</div>' +
         '<div class="tt-row">扫描 ' + (stats ? stats.scanned : 0) + ' 条 → 精选 ' + (stats ? stats.selected : 0) + ' 条 → 屏蔽 ' + (stats ? stats.filtered : 0) + ' 条</div>';
 
-      // 分组标题：静态展示（标签页本身就是分组，折叠按钮已无意义）
-      function groupHeader(label, count) {
-        return h('div', { className: 'lf-group' },
-          h('span', { className: 'lf-group-label' }, label),
-          h('span', { className: 'lf-group-count' }, String(count)),
+      // ── 按刷新周期分组（cycle 为刷新事件时间戳；缺失/历史条目归入「更早」）──
+      function groupItems(items, timeOf) {
+        const map = new Map();
+        for (const it of items) {
+          const c = (it.cycle === undefined || it.cycle === null) ? -1 : it.cycle;
+          if (!map.has(c)) map.set(c, { cycle: c, items: [], time: 0 });
+          const g = map.get(c);
+          g.items.push(it);
+          const t = timeOf(it) || 0;
+          if (t > g.time) g.time = t;
+        }
+        return Array.from(map.values()).sort((a, b) => b.cycle - a.cycle);
+      }
+      function isCycleCollapsed(cycle, groups) {
+        if (collapsedCycles !== null) return collapsedCycles.has(cycle);
+        const newest = groups.length ? groups[0].cycle : null;
+        return cycle !== newest; // 默认：仅最新一轮展开
+      }
+      function toggleCycle(cycle, groups) {
+        setCollapsedCycles((prev) => {
+          const newest = groups.length ? groups[0].cycle : null;
+          const set = prev !== null ? new Set(prev) : new Set(groups.map((g) => g.cycle).filter((c) => c !== newest));
+          if (set.has(cycle)) set.delete(cycle); else set.add(cycle);
+          return set;
+        });
+      }
+      // 周期组头：显示该轮刷新的相对时间；点击展开/折叠
+      function cycleGroup(g, groups, children) {
+        const collapsed = isCycleCollapsed(g.cycle, groups);
+        const label = g.cycle < 0 ? '更早' : ('刷新于 ' + (g.time ? fmtTime(g.time) : ''));
+        return h('div', { key: 'g' + g.cycle },
+          h('button', {
+            className: 'lf-group' + (collapsed ? ' lf-collapsed' : ''),
+            title: g.cycle < 0 ? '无法确定刷新时间的条目' : (new Date(g.cycle).toLocaleString() + ' 的刷新 · 点击' + (collapsed ? '展开' : '折叠')),
+            onClick: () => toggleCycle(g.cycle, groups),
+          },
+            h('span', { className: 'lf-group-label' }, label),
+            h('span', { className: 'lf-group-count' }, g.items.length + ' 条'),
+            h('span', { className: 'lf-group-chevron' }, collapsed ? '▸' : '▾'),
+          ),
+          collapsed ? null : children,
         );
       }
 
@@ -583,9 +641,9 @@ return {
       function listContent() {
         if (tab === 'blocked') {
           if (!filterLog.length) return emptyEl('暂无被屏蔽内容', '被过滤掉的条目会显示在这里，可撤销恢复', false);
-          return h('div', null,
-            groupHeader('被屏蔽', filterLog.length),
-            filterLog.map((it, i) => h('div', { key: i, className: 'lf-filter-item' },
+          const groups = groupItems(filterLog, (it) => (it.ts ? Date.parse(it.ts) : 0));
+          return h('div', null, groups.map((g) => cycleGroup(g, groups,
+            g.items.map((it, i) => h('div', { key: i, className: 'lf-filter-item' },
               h('div', { className: 'lf-filter-info' },
                 h('a', { className: 'lf-filter-title', href: it.url, target: '_blank', rel: 'noreferrer', title: '在新标签页打开原文' }, it.title),
                 h('div', { className: 'lf-filter-meta' }, it.sourceId + ' · ' + (it.reason === 'block-keyword' ? '屏蔽词命中' : (it.reason === 'max-candidates' ? '候选上限截断' : '模型筛选')) + ' · ' + fmtTime(it.ts ? Date.parse(it.ts) : 0)),
@@ -596,34 +654,25 @@ return {
                 showToast('已撤销：该条目已恢复为未读卡片 ✓');
               } }, '撤销'),
             )),
-          );
+          )));
         }
         if (tab === 'unread') {
-          if (!latestCards.length && !unreadCards.length) {
+          const unread = cards.filter((c) => !c.read);
+          if (!unread.length) {
             return emptyEl('暂无未读内容', status.paused ? '采集已暂停' : '在设置中启用搜索源后开始采集', true);
           }
-          return h('div', null,
-            latestCards.length ? h('div', { key: 'latest' },
-              groupHeader('最新', latestCards.length),
-              latestCards.map(renderCard)) : null,
-            unreadCards.length ? h('div', { key: 'unread' },
-              groupHeader('未读', unreadCards.length),
-              unreadCards.map(renderCard)) : null,
-          );
+          const groups = groupItems(unread, (c) => c.createdAt || 0);
+          return h('div', null, groups.map((g) => cycleGroup(g, groups, g.items.map(renderCard))));
         }
         if (tab === 'read') {
           if (!readCards.length) return emptyEl('暂无已读内容', '', false);
-          return h('div', null,
-            groupHeader('已读', readCards.length),
-            readCards.map(renderCard),
-          );
+          const groups = groupItems(readCards, (c) => c.createdAt || 0);
+          return h('div', null, groups.map((g) => cycleGroup(g, groups, g.items.map(renderCard))));
         }
         // dislike
         if (!dislikeCards.length) return emptyEl('暂无不感兴趣内容', '在未读/已读中左滑卡片即可标记', false);
-        return h('div', null,
-          groupHeader('不感兴趣', dislikeCards.length),
-          dislikeCards.map(renderCard),
-        );
+        const groups = groupItems(dislikeCards, (c) => c.createdAt || 0);
+        return h('div', null, groups.map((g) => cycleGroup(g, groups, g.items.map(renderCard))));
       }
 
       return h('div', null,
@@ -658,6 +707,11 @@ return {
               status.paused ? '恢复' : '暂停'),
             h('button', { className: 'lf-mark-all', onClick: async () => { await call('dsh-livefeed/mark-all-read'); refresh(); showToast('已全部标记已读 ✓'); } }, '全部已读'),
           ),
+          settingsOpen ? null : ((status.sourceErrors || []).length ? h('div', { className: 'lf-src-err' },
+            (status.sourceErrors || []).map((s, i) => h('div', { key: i, className: 'lf-src-err-item' },
+              h('b', null, String(s.sourceId || '') + '：'), String(s.message || '').slice(0, 100), '（点右上角「立即刷新」重试）',
+            )),
+          ) : null),
           settingsOpen ? null : h('div', { className: 'lf-tabs' },
             tabDefs.map((t) => h('button', {
               key: t.id,
