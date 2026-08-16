@@ -21,7 +21,7 @@ return {
     const PREFERENCES_FILE = CONFIG_DIR + '\\preferences.json';
     const TEMPLATE_FILE = CONFIG_DIR + '\\sources\\_template.js';
     const ROUTE_PATH = '/api/dsh-livefeed';
-    const DEFAULT_INTERVAL_MIN = 10;
+    const DEFAULT_INTERVAL_MIN = 60;
     const DEFAULT_MAX_CARDS = 8;
     const DEFAULT_MAX_CANDIDATES = 5;
     const DEFAULT_ARCHIVE_MAX = 5000;

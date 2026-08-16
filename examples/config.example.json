@@ -1,5 +1,5 @@
 {
-  "intervalMinutes": 10,
+  "intervalMinutes": 60,
   "maxCards": 8,
   "maxCandidatesPerSource": 5,
   "summaryLanguage": "zh-CN",
