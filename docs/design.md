@@ -184,8 +184,9 @@
 ### 7.5 事件聚类、屏蔽日志与统计（v3 新增）
 
 - **事件聚类**：阶段 3 将跨源候选按事件聚类（同事件多源合并），每簇一张卡片：主条目 = `sourceWeights` 加权最高者（无权重时取 `publishedAt` 最早）；卡片带 `relatedUrls: [{url, sourceName}]`，UI 在 meta 行显示「+N 来源」。保证同一新闻不出现多张相似卡片。
+- **不感兴趣组（内容区）与「被屏蔽内容」（设置页）不重叠**：前者是你左滑主动标记的、已进入过面板的卡片；后者是管线过滤掉的、从未进入面板的条目（`block-keyword`/`model-filter`），用于透明可见与误伤纠正。流水线：采集 → 系统过滤（被屏蔽，可撤销）→ 撤销进面板（未读）→ 左滑标记 → 不感兴趣组。
 - **屏蔽日志（filterLog，内存态，有界 200 条）**：`{title, url, sourceId, reason: 'block-keyword'|'model-filter', ts}`。设置页「被屏蔽内容」区展示（标题+来源+原因），可**撤销**：
-  - 撤销 = URL 加入 `exemptUrls`（持久化于 state.json），该条目立即以**降级卡片**（标题+snippet，无模型摘要）插入未读组；
+  - 撤销 = URL 加入 `exemptUrls`（持久化于 state.json），该条目立即以**降级卡片**（标题+snippet，无模型摘要）插入未读组，并从 `filterLog` 移除；
   - 后续周期豁免优先于一切过滤（确定性+语义）；`seenUrls` 去重仍生效，不会重复展示同一 URL。
 - **被过滤统计（cycleStats）**：`{scanned, selected, filtered}`（粗搜条目 / 入选候选 / 被过滤数），状态行显示「本次 N → 精选 M → 屏蔽 K」；进入「被屏蔽内容」区顶部展示。
 - **词管理**：设置页可直接编辑 `interests`（写 config.json）与用户屏蔽词 `blockWords`（写 config.json）；生效屏蔽词 = `blockWords ∪ preferences.block`（两层互不覆盖，AI 增量学习只改后者）。
