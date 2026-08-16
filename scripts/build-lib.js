@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 function extractApply(src) {
-  const m = src.match(/apply\(ctx\) \{\n([\s\S]*)\n  \},\n\};$/);
+  // 兼容 Windows CRLF；JS 正则 $ 需绝对结尾，去掉尾部空白/换行
+  const s = src.replace(/\r\n/g, '\n').replace(/[ \t\n]+$/, '');
+  const m = s.match(/apply\(ctx\) \{\n([\s\S]*)\n  \},\n\};$/);
   if (!m) throw new Error('apply body not found');
   return m[1];
 }
