@@ -61,18 +61,18 @@ async function fetchPage(api, url) {
   return api.fetchContent({ url: String(url) });
 }
 
-/** HTML 实体解码（含 <br> 换行、去标签） */
+/** HTML 实体解码（含 <br> 换行、去标签、数字/十六进制实体如 &#x2F;） */
 function decodeEntities(s) {
   return String(s)
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/gi, "'");
+    .replace(/&#x([0-9a-fA-F]+);/g, (m, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (m, d) => String.fromCharCode(Number(d)))
+    .replace(/&amp;/gi, '&');
 }
 
 /** 通用 HTML→文本：去标签、压缩空白，可选截断 */
