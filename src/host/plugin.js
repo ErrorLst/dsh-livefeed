@@ -748,6 +748,7 @@ return {
       'filter-log': async () => ({
         items: state.filterLog.slice(-FILTER_LOG_CAP).reverse(),
       }),
+      'debug-log': async () => ({ items: requestLog.slice(-200).reverse() }),
       'unblock': async (args) => {
         const url = String((args && args.url) || '');
         if (!url) return { ok: false };
@@ -788,6 +789,20 @@ return {
       });
     }
 
+    // 请求日志（内存，有界）：诊断浏览器侧是否真的到达本路由
+    const requestLog = [];
+    function logRequest(req, method, ok, info) {
+      requestLog.push({
+        ts: new Date().toISOString(),
+        httpMethod: req.method,
+        url: String(req.url || ''),
+        method,
+        ok: !!ok,
+        info: String(info || ''),
+      });
+      if (requestLog.length > 200) requestLog.splice(0, requestLog.length - 200);
+    }
+
     // ══ 启动：装载 + HTTP 路由 + 动态 harness + 定时器（随 fiber 自动清理）══
     ctx.effect(() => {
       loadAll();
@@ -816,10 +831,13 @@ return {
           }
           const method = String(payload.method || '');
           const handler = handlers[method];
-          if (!handler) { send(404, { ok: false, error: 'unknown method: ' + method }); return; }
+          if (!handler) { logRequest(req, method, false, 'unknown method'); send(404, { ok: false, error: 'unknown method: ' + method }); return; }
           try {
-            send(200, { ok: true, data: await handler(payload.args || {}) });
+            const data = await handler(payload.args || {});
+            logRequest(req, method, true, 'ok');
+            send(200, { ok: true, data });
           } catch (err) {
+            logRequest(req, method, false, String((err && err.message) || err));
             send(500, { ok: false, error: String((err && err.message) || err) });
           }
         },
