@@ -165,7 +165,7 @@ return {
   color: var(--dsw-alias-label-primary); font-size: 12px; cursor: pointer;
 }
 .lf-ghostbtn:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.lf-settings { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.lf-settings { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
 .lf-settings .lf-scroll { padding: 4px 0 16px; }
 .lf-sec { padding: 14px 14px 4px; }
 .lf-sec + .lf-sec { border-top: 1px solid var(--dsw-alias-border-l1); margin-top: 4px; }
@@ -212,6 +212,15 @@ return {
   font-size: 11px; font-family: inherit; outline: none;
 }
 .lf-thresh-item input:focus { border-color: var(--dsw-alias-state-business-primary); }
+.lf-sec-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.lf-sec-title-row .lf-sec-title { margin-bottom: 0; }
+.lf-gearbtn { flex: none; border: none; background: none; cursor: pointer; font-size: 13px; line-height: 1; color: var(--dsw-alias-label-tertiary); padding: 3px 5px; border-radius: 6px; }
+.lf-gearbtn:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.lf-thresh-body { flex: 1; overflow-y: auto; padding: 4px 14px 10px; }
+.lf-thresh-src { display: flex; align-items: flex-end; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--dsw-alias-border-l1); }
+.lf-thresh-src:last-of-type { border-bottom: none; }
+.lf-thresh-src-name { flex: 1; min-width: 0; font-size: 12px; font-weight: 500; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lf-thresh-note { font-size: 10px; color: var(--dsw-alias-label-tertiary); margin: 0 0 6px; }
 .lf-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .lf-chip {
   display: inline-flex; align-items: center; gap: 4px;
@@ -722,6 +731,7 @@ return {
       const [maxCoarse, setMaxCoarse] = React.useState(15);
       const [maxFine, setMaxFine] = React.useState(5);
       const [srcMax, setSrcMax] = React.useState({}); // { [sourceId]: { coarse, fine } }，null 表示跟随全局
+      const [threshOpen, setThreshOpen] = React.useState(false);
       const [toggles, setToggles] = React.useState({});
       const [interests, setInterests] = React.useState([]);
       const [blockWords, setBlockWords] = React.useState([]);
@@ -853,32 +863,16 @@ return {
               onChange: (e) => setIntervalMin(Number(e.target.value) || 10),
             })),
           ),
-          // 搜索源管理
+          // 搜索源管理（阈值设置收进 ⚙ 弹卡）
           h('div', { className: 'lf-sec' },
-            h('div', { className: 'lf-sec-title' }, '搜索源管理'),
-            h('div', { className: 'lf-thresh-global' },
-              h('label', { className: 'lf-thresh-item' }, h('span', null, '粗搜默认上限'), h('input', { type: 'number', min: 1, max: 100, value: maxCoarse, onChange: (e) => setMaxCoarse(Number(e.target.value) || 15) })),
-              h('label', { className: 'lf-thresh-item' }, h('span', null, '精搜默认上限'), h('input', { type: 'number', min: 1, max: 20, value: maxFine, onChange: (e) => setMaxFine(Number(e.target.value) || 5) })),
+            h('div', { className: 'lf-sec-title-row' },
+              h('div', { className: 'lf-sec-title' }, '搜索源管理'),
+              h('button', { className: 'lf-gearbtn', title: '阈值设置（粗搜/精搜上限）', onClick: () => setThreshOpen(true) }, '⚙'),
             ),
-            h('p', { className: 'lf-rules-meta' }, '粗搜=每源每轮拉取条目数；精搜=每源进入正文抓取+摘要的候选数。源级留空=用全局默认'),
             sources.length ? sources.map((s) => h('div', { key: s.id, className: 'lf-source-row' + (toggles[s.id] === false ? ' lf-disabled' : '') },
               h('div', { className: 'lf-source-info' },
                 h('div', { className: 'lf-source-name' }, s.name || s.id),
                 h('div', { className: 'lf-source-id' }, s.id + ' · 查询：' + (s.query || '未设置')),
-              ),
-              h('div', { className: 'lf-thresh' },
-                h('label', { className: 'lf-thresh-item' }, h('span', null, '粗搜'), h('input', {
-                  type: 'number', min: 1, max: 100,
-                  placeholder: String(maxCoarse),
-                  value: (srcMax[s.id] && srcMax[s.id].coarse) || '',
-                  onChange: (e) => { const v = e.target.value; const n = v === '' ? null : (Number(v) || null); setSrcMax(Object.assign({}, srcMax, { [s.id]: Object.assign({}, srcMax[s.id] || {}, { coarse: n }) })); },
-                })),
-                h('label', { className: 'lf-thresh-item' }, h('span', null, '精搜'), h('input', {
-                  type: 'number', min: 1, max: 20,
-                  placeholder: String(maxFine),
-                  value: (srcMax[s.id] && srcMax[s.id].fine) || '',
-                  onChange: (e) => { const v = e.target.value; const n = v === '' ? null : (Number(v) || null); setSrcMax(Object.assign({}, srcMax, { [s.id]: Object.assign({}, srcMax[s.id] || {}, { fine: n }) })); },
-                })),
               ),
               h('label', { className: 'lf-switch' },
                 h('input', { type: 'checkbox', checked: toggles[s.id] !== false, onChange: (e) => setToggles(Object.assign({}, toggles, { [s.id]: e.target.checked })) }),
@@ -938,6 +932,41 @@ return {
           ),
           h('p', { className: 'lf-settings-note' }, '保存后写入 config.json，下一个刷新周期生效；关闭的搜索源将跳过采集。'),
         ),
+        // 阈值设置弹卡（⚙ 按钮打开）
+        threshOpen ? h('div', { className: 'lf-modal', onClick: () => setThreshOpen(false) },
+          h('div', { className: 'lf-modal-card', onClick: (e) => e.stopPropagation() },
+            h('div', { className: 'lf-modal-head' },
+              h('div', { className: 'lf-modal-title' }, '阈值设置'),
+              h('button', { className: 'lf-iconbtn', title: '关闭', onClick: () => setThreshOpen(false) },
+                iconSvg('M18 6 6 18' + 'M6 6l12 12', 14)),
+            ),
+            h('div', { className: 'lf-thresh-body' },
+              h('div', { className: 'lf-thresh-global' },
+                h('label', { className: 'lf-thresh-item' }, h('span', null, '粗搜默认上限'), h('input', { type: 'number', min: 1, max: 100, value: maxCoarse, onChange: (e) => setMaxCoarse(Number(e.target.value) || 15) })),
+                h('label', { className: 'lf-thresh-item' }, h('span', null, '精搜默认上限'), h('input', { type: 'number', min: 1, max: 20, value: maxFine, onChange: (e) => setMaxFine(Number(e.target.value) || 5) })),
+              ),
+              h('p', { className: 'lf-thresh-note' }, '默认值应用于未单独设置的源；源级数值覆盖全局，留空 = 跟随全局。修改后请在主设置界面点「保存」生效。'),
+              sources.length ? sources.map((s) => h('div', { key: s.id, className: 'lf-thresh-src' },
+                h('div', { className: 'lf-thresh-src-name' }, s.name || s.id),
+                h('label', { className: 'lf-thresh-item' }, h('span', null, '粗搜'), h('input', {
+                  type: 'number', min: 1, max: 100,
+                  placeholder: String(maxCoarse),
+                  value: (srcMax[s.id] && srcMax[s.id].coarse) || '',
+                  onChange: (e) => { const v = e.target.value; const n = v === '' ? null : (Number(v) || null); setSrcMax(Object.assign({}, srcMax, { [s.id]: Object.assign({}, srcMax[s.id] || {}, { coarse: n }) })); },
+                })),
+                h('label', { className: 'lf-thresh-item' }, h('span', null, '精搜'), h('input', {
+                  type: 'number', min: 1, max: 20,
+                  placeholder: String(maxFine),
+                  value: (srcMax[s.id] && srcMax[s.id].fine) || '',
+                  onChange: (e) => { const v = e.target.value; const n = v === '' ? null : (Number(v) || null); setSrcMax(Object.assign({}, srcMax, { [s.id]: Object.assign({}, srcMax[s.id] || {}, { fine: n }) })); },
+                })),
+              )) : h('p', { className: 'lf-thresh-note' }, '暂无搜索源'),
+            ),
+            h('div', { className: 'lf-modal-actions' },
+              h('button', { className: 'lf-ghostbtn', style: { margin: 0 }, onClick: () => setThreshOpen(false) }, '关闭'),
+            ),
+          ),
+        ) : null,
       );
     }
 
