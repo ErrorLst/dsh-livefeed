@@ -50,6 +50,7 @@ Host 将模板与源脚本拼接（`program = 模板 + "\n" + 源脚本`）后�
 
 1. 新建 `sources/<源id>.js`，实现 `coarseSearch`（及可选 `fineSearch`）；
 2. `config.json` 的 `sources` 数组增加一行：`{ "id", "name", "script": "sources/<源id>.js", "query", "enabled": true }`；
+   可选源级阈值：`maxItems`（粗搜上限，覆盖全局 `maxCoarseItems`，默认 15）、`maxCandidates`（精搜候选上限，覆盖全局 `maxCandidatesPerSource`，默认 5）；留空则用全局默认值；
 3. 等待下一周期（或点面板「立即刷新」）生效；脚本报错会显示在面板状态行。
 
 ## 6. 完整示例：Linux.do（Discourse 论坛）
