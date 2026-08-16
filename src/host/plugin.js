@@ -500,13 +500,42 @@ return {
       return best;
     }
 
+    // 安全验证页/反爬拦截页识别：这类页面文本非空但内容无效，
+    // 命中后视为「正文为空」→ 卡片直接丢弃（不生成拦截提示类摘要）
+    function isBlockPage(text) {
+      const t = String(text || '').toLowerCase();
+      // 强特征：出现即判定（几乎不会出现在正常正文）
+      const strong = [
+        'attention required', 'checking your browser', 'verify you are human',
+        'enable javascript and cookies', 'just a moment', 'access denied',
+        'you have been blocked', 'cf-chl', 'captcha', 'puzzle',
+        'your current connection has been blocked', 'we have detected unusual activity',
+        '异常活动', '安全系统阻止', '检测到异常', '安全验证',
+      ];
+      for (const m of strong) if (t.indexOf(m) >= 0) return true;
+      // 弱特征：短页面（拦截页通常很小）且命中多个才判定，避免误杀正常长文
+      const weak = ['cloudflare', 'akamai', 'security check', 'bot', 'challenge', 'reference number', 'permission', 'blocked', '被阻止', '安全系统'];
+      let w = 0;
+      if (t.length < 12000) {
+        for (const m of weak) if (t.indexOf(m) >= 0) w++;
+      }
+      return w >= 2;
+    }
+
     async function stageFineAndSummarize(cluster) {
       const main = pickMain(cluster.members);
       let content = null;
       try {
         const program = await loadTemplateAndScript(main.source);
         const out = await runSourceScript(program, { mode: 'content', config: main.source, item: main.item });
-        if (out && out.text) content = out.text;
+        if (out && out.text) {
+          if (isBlockPage(out.text)) {
+            console.log('[dsh-livefeed] block-page content skipped:', main.item.url);
+            content = null;
+          } else {
+            content = out.text;
+          }
+        }
       } catch (err) {
         console.error('[dsh-livefeed] fineSearch failed:', String(err && err.message || err));
       }
