@@ -81,4 +81,4 @@ async function fineSearch(api, item) {
 }
 ```
 
-另见示例：[search-ai.js](../examples/sources/search-ai.js)（搜索引擎型）、[hn.js](../examples/sources/hn.js)（Algolia JSON API，`jsonItems` 用法）、[linuxdo.js](../examples/sources/linuxdo.js)。
+另见示例：[search-ai.js](../examples/sources/search-ai.js)（搜索引擎型）、[hn.js](../examples/sources/hn.js)（news.ycombinator.com 直抓解析，不依赖第三方 API）、[linuxdo.js](../examples/sources/linuxdo.js)。
