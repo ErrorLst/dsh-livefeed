@@ -1,0 +1,5 @@
+# dsh-livefeed bundle：向组合挂载 Host half（采集管线 + HTTP API /api/dsh-livefeed）。
+# 浏览器端由 package.json 的 dsh.client 声明自动进入 boot 图（lib/client.js）。
+- insert:
+    - id: dsh-livefeed
+      name: '@dsh-external/dsh-livefeed'

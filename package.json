@@ -1,20 +1,36 @@
 {
-  "name": "dsh-livefeed",
+  "name": "@dsh-external/dsh-livefeed",
+  "description": "DSH 实时讯息面板：定时从可配置的搜索源脚本采集内容，模型筛选/聚类/摘要，右缘悬浮面板四层分组展示，左滑反馈与 AI 过滤规则学习",
   "version": "0.1.0",
   "private": true,
-  "description": "DSH 实时讯息面板插件：定时从可配置的搜索源脚本采集内容，由大模型筛选与摘要，在 GUI 右缘悬浮面板以卡片展示",
   "type": "module",
-  "license": "MIT",
-  "scripts": {
-    "prototype": "explorer prototype\\prototype.html",
-    "docs": "echo see docs/design.md and docs/source-contract.md"
+  "main": "lib/index.mjs",
+  "exports": {
+    ".": {
+      "default": "./lib/index.mjs"
+    },
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
   },
-  "keywords": [
-    "dsh",
-    "plugin",
-    "feed",
-    "rss",
-    "news",
-    "cordis"
-  ]
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build-lib.js",
+    "prototype": "explorer prototype\\prototype.html"
+  },
+  "peerDependencies": {
+    "cordis": "^4.0.0-rc.7"
+  },
+  "license": "MIT"
 }
