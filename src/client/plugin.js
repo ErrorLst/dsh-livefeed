@@ -226,7 +226,8 @@ return {
 .lf-filter-item { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--dsw-alias-border-l1); }
 .lf-filter-item:last-child { border-bottom: none; }
 .lf-filter-info { flex: 1; min-width: 0; }
-.lf-filter-title { font-size: 11.5px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lf-filter-title { font-size: 11.5px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; text-decoration: none; }
+.lf-filter-title:hover { color: var(--dsw-alias-state-business-primary); }
 .lf-filter-meta { font-size: 10px; color: var(--dsw-alias-label-tertiary); margin-top: 1px; }
 .lf-filter-reason { font-size: 10px; padding: 0 5px; border-radius: 4px; background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-tertiary); }
 .lf-unblock {
@@ -277,6 +278,31 @@ return {
   background: var(--dsw-alias-toast-bg); color: var(--dsw-static-neutral-bluish-00);
   font-size: 11px;
 }
+/* 摘要弹窗（未读/已读点击后） */
+.lf-modal {
+  position: absolute; inset: 0; z-index: 150;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--dsw-alias-bg-mask-2); padding: 16px;
+}
+.lf-modal-card {
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l1); border-radius: 12px;
+  width: 100%; max-height: 82%; display: flex; flex-direction: column; overflow: hidden;
+}
+.lf-modal-head { display: flex; align-items: flex-start; gap: 8px; padding: 14px 12px 8px 14px; }
+.lf-modal-title { flex: 1; font-size: 14px; font-weight: 600; color: var(--dsw-alias-label-primary); line-height: 1.5; }
+.lf-modal-meta { padding: 0 14px 6px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+.lf-modal-summary {
+  flex: 1; overflow-y: auto; padding: 4px 14px 12px;
+  font-size: 12.5px; line-height: 1.7; color: var(--dsw-alias-label-secondary);
+  white-space: pre-wrap; word-break: break-word;
+}
+.lf-modal-related { padding: 0 14px 10px; display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--dsw-alias-border-l1); padding-top: 10px; }
+.lf-modal-related-title { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+.lf-modal-related-link { font-size: 12px; color: var(--dsw-alias-state-business-primary); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lf-modal-related-link:hover { text-decoration: underline; }
+.lf-modal-actions { padding: 8px 14px 14px; display: flex; justify-content: flex-end; }
+.lf-modal-actions .lf-primarybtn { text-decoration: none; display: inline-flex; align-items: center; }
 `;
     function ensureStyle() {
       if (typeof document === 'undefined') return;
@@ -376,7 +402,15 @@ return {
       function onClick(e) {
         const d = drag.current;
         if (d.moved) { d.moved = false; e.preventDefault(); return; }
-        if (!card.read) props.onMarkRead(card.id); // 打开原文 → 自动已读（不阻止默认跳转）
+        if (props.detailClick) {
+          // 未读/已读：弹窗展示摘要，不直接跳转
+          e.preventDefault();
+          if (!card.read) props.onMarkRead(card.id);
+          if (props.onDetail) props.onDetail(card);
+          return;
+        }
+        // 不感兴趣：直接跳转原文（不阻止默认行为）
+        if (!card.read) props.onMarkRead(card.id);
       }
 
       const isDislike = card.feedback === 'dislike';
@@ -432,6 +466,7 @@ return {
       const toastTimer = React.useRef(null);
       const [tab, setTab] = React.useState('unread');
       const [filterLog, setFilterLog] = React.useState([]);
+      const [detail, setDetail] = React.useState(null); // 摘要弹窗当前卡片
 
       const refresh = React.useCallback(async () => {
         try {
@@ -515,8 +550,10 @@ return {
       function renderCard(c) {
         return h(CardItem, {
           key: c.id, card: c, compact: tab === 'dislike',
+          detailClick: tab !== 'dislike', // 未读/已读弹窗预览；不感兴趣直接跳原文
           onMarkRead: (id) => { call('dsh-livefeed/mark', { cardId: id, read: true }); refresh(); },
           onFeedback: (id, fb) => { call('dsh-livefeed/mark', { cardId: id, feedback: fb }); refresh(); },
+          onDetail: (c) => setDetail(c),
         });
       }
 
@@ -536,7 +573,7 @@ return {
             groupHeader('blocked', '被屏蔽', filterLog.length),
             filterLog.map((it, i) => h('div', { key: i, className: 'lf-filter-item' },
               h('div', { className: 'lf-filter-info' },
-                h('div', { className: 'lf-filter-title' }, it.title),
+                h('a', { className: 'lf-filter-title', href: it.url, target: '_blank', rel: 'noreferrer', title: '在新标签页打开原文' }, it.title),
                 h('div', { className: 'lf-filter-meta' }, it.sourceId + ' · ' + (it.reason === 'block-keyword' ? '屏蔽词命中' : '模型筛选') + ' · ' + fmtTime(it.ts ? Date.parse(it.ts) : 0)),
               ),
               h('button', { className: 'lf-unblock', onClick: async () => {
@@ -620,6 +657,31 @@ return {
           settingsOpen
             ? h(SettingsView, { key: 'settings', status, refresh, showToast, onBack: () => setSettingsOpen(false) })
             : h('div', { className: 'lf-scroll' }, listContent()),
+          // 摘要弹窗（未读/已读卡片点击后展示）
+          detail ? h('div', { className: 'lf-modal', onClick: () => setDetail(null) },
+            h('div', { className: 'lf-modal-card', onClick: (e) => e.stopPropagation() },
+              h('div', { className: 'lf-modal-head' },
+                h('div', { className: 'lf-modal-title' }, detail.title),
+                h('button', { className: 'lf-iconbtn', title: '关闭', onClick: () => setDetail(null) },
+                  iconSvg('M18 6 6 18' + 'M6 6l12 12', 14)),
+              ),
+              h('div', { className: 'lf-modal-meta' },
+                detail.sourceName ? h('span', { className: 'lf-source-tag' }, detail.sourceName) : null,
+                h('span', null, fmtTime(detail.createdAt) || detail.publishedAt || ''),
+              ),
+              h('div', { className: 'lf-modal-summary' }, detail.summary || '（暂无摘要内容）'),
+              detail.relatedUrls && detail.relatedUrls.length
+                ? h('div', { className: 'lf-modal-related' },
+                    h('div', { className: 'lf-modal-related-title' }, '相关来源（同一事件的其他报道）'),
+                    detail.relatedUrls.map((r, i) =>
+                      h('a', { key: i, className: 'lf-modal-related-link', href: r.url, target: '_blank', rel: 'noreferrer' }, (r.sourceName || r.url) + ' ↗')),
+                  )
+                : null,
+              h('div', { className: 'lf-modal-actions' },
+                h('a', { className: 'lf-primarybtn', href: detail.url, target: '_blank', rel: 'noreferrer' }, '跳转原文 ↗'),
+              ),
+            ),
+          ) : null,
           toast ? h('div', { className: 'lf-toast' }, toast) : null,
         ),
         h('button', {
