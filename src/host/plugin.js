@@ -425,18 +425,19 @@ return {
       if (!fallbackText) return null;
       let title = main.item.title;
       let summary = '';
-      if (content) {
-        try {
-          const system =
-            '你是资讯摘要助手。把给定内容压缩成 2-3 句「' + (state.config.summaryLanguage || 'zh-CN') +
-            '」摘要，并给出更准确的标题。只输出 JSON: {"title":"…","summary":"…"}';
-          const parsed = extractJson(await callModel(system, '标题: ' + main.item.title + '\n内容:\n' + content.slice(0, 6000), 1500));
-          if (parsed && parsed.title && parsed.summary) { title = parsed.title; summary = parsed.summary; }
-          else summary = fallbackText.slice(0, 300);
-        } catch (_) {
-          summary = fallbackText.slice(0, 300);
-        }
-      } else {
+      const lang = state.config.summaryLanguage || 'zh-CN';
+      // 无论是否抓到正文（有片段也算），都交给模型生成目标语言标题+摘要；
+      // 明确要求标题翻译，专有名词/产品名可保留原文，避免模型「最准确的标题=原标题」而保留英文。
+      const sourceText = content || snippets;
+      try {
+        const system =
+          '你是资讯摘要助手。把给定内容压缩成 2-3 句「' + lang +
+          '」摘要，并给出更准确的标题。标题必须翻译成「' + lang +
+          '」（专有名词/产品名/品牌名可保留原文）。只输出 JSON: {"title":"…","summary":"…"}';
+        const parsed = extractJson(await callModel(system, '标题: ' + main.item.title + '\n内容:\n' + sourceText.slice(0, 6000), 1500));
+        if (parsed && parsed.title && parsed.summary) { title = parsed.title; summary = parsed.summary; }
+        else summary = fallbackText.slice(0, 300);
+      } catch (_) {
         summary = fallbackText.slice(0, 300);
       }
       return {
