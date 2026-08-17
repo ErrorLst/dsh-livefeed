@@ -496,8 +496,10 @@ return {
         '\n最近不感兴趣样本: ' + JSON.stringify(recent) +
         '\n只输出 JSON: {"selected":[{"index":0,"reason":"一句话理由"}]}。宁可少选，不选明显无关或与样本相似的内容。';
       let parsed = null;
+      // 思考等级较高时输出预算可能被思考过程占用导致 JSON 截断；重试逐次加大预算
+      const budgets = [4000, 6000, 8000];
       for (let attempt = 1; attempt <= 3; attempt++) {
-        const raw = await callModel(system, JSON.stringify(list, null, 1), 4000);
+        const raw = await callModel(system, JSON.stringify(list, null, 1), budgets[attempt - 1]);
         parsed = extractJson(raw);
         if (parsed && Array.isArray(parsed.selected)) break;
         console.warn('[dsh-livefeed] judge parse failed, retry', attempt + '/3');
@@ -596,10 +598,11 @@ return {
       const system =
         '将以下条目按“同一事件/话题”聚类（不同网站报道同一新闻算同一簇）。' +
         '只输出 JSON: {"clusters":[{"members":[0,2]}]}。每个条目只能属于一个簇；无法归并的条目单独成簇 [i]。';
-      // 解析失败重试（最多 3 次）；仍失败则退回「各自成簇」（不会中断周期）
+      // 解析失败重试（最多 3 次，预算逐次加大）；仍失败则退回「各自成簇」（不会中断周期）
       let parsed = null;
+      const budgets = [2500, 4000, 6000];
       for (let attempt = 1; attempt <= 3; attempt++) {
-        const raw = await callModel(system, JSON.stringify(list, null, 1), 2500);
+        const raw = await callModel(system, JSON.stringify(list, null, 1), budgets[attempt - 1]);
         parsed = extractJson(raw);
         if (parsed && Array.isArray(parsed.clusters)) break;
         console.warn('[dsh-livefeed] cluster parse failed, retry', attempt + '/3');
