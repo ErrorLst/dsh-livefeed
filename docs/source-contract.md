@@ -104,7 +104,7 @@ function parseJsonBody(content, what) {
 }
 ```
 
-另见示例：[search-ai.js](../examples/sources/search-ai.js)（搜索引擎型）、[hn.js](../examples/sources/hn.js)（news.ycombinator.com 直抓解析，不依赖第三方 API）。
+另见示例：[search-ai.js](../examples/sources/search-ai.js)（搜索引擎型）、[hn.js](../examples/sources/hn.js)（news.ycombinator.com 直抓解析，不依赖第三方 API）、[v2ex.js](../examples/sources/v2ex.js)（JSON API 型）、[solidot.js](../examples/sources/solidot.js)（RSS 型，需浏览器 UA）、[arxiv.js](../examples/sources/arxiv.js)（多分类 RSS 合并，query 逗号分隔分类）。
 
 ## 7. 受 Cloudflare 保护站点的抓取
 
