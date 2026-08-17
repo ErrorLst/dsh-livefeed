@@ -4,18 +4,23 @@
  * config.json 本源行配置 "fetch": "browser" → Host 用系统 Edge（有头离屏，
  * playwright-core）直连抓取，走系统代理，不依赖任何第三方服务。
  *
- * 粗搜两条路径（顺序：最新在前，热门补足；跨列表去重）：
+ * 粗搜三条路径（顺序：最新 → 热门 → 本周排行；跨列表去重）：
  * 1. latest.json —— 全站最新 30 条话题；
- * 2. hot.json —— 热门话题（heat 热度排序，含较早发布但仍在活跃的话题，
- *    补上「最新 30 条」错过的时间窗外的热门内容）。
- * 两列表均过滤置顶帖；config 的 maxItems 决定合并后送入筛选的总数（建议 ≥60）。
+ * 2. hot.json —— 热门话题（heat 热度排序，含较早发布但仍在活跃的话题）；
+ * 3. top.json?period=weekly —— 本周排行（点赞/浏览量维度）。
+ * 各列表均过滤置顶帖；config 的 maxItems 决定合并后送入筛选的总数（建议 ≥90）。
  * （linux.do 的 search.json 对匿名请求限流 429，故不使用搜索接口；query 留空）
  * 精搜：话题 JSON（/t/{id}.json）→ 首帖 cooked(HTML) 转文本
  */
 async function coarseSearch(api) {
   const out = [];
   const seen = new Set();
-  for (const listUrl of ['https://linux.do/latest.json', 'https://linux.do/hot.json']) {
+  const listUrls = [
+    'https://linux.do/latest.json',
+    'https://linux.do/hot.json',
+    'https://linux.do/top.json?period=weekly',
+  ];
+  for (const listUrl of listUrls) {
     const page = await fetchPage(api, listUrl);
     const data = parseJsonBody(page.body.content, listUrl.split('/').pop());
     const topics = (data && data.topic_list && data.topic_list.topics) || [];
@@ -24,7 +29,7 @@ async function coarseSearch(api) {
       if (t.pinned) continue; // 置顶帖（论坛公告等）每周期重复出现，跳过
       const slug = String(t.slug || '');
       const itemUrl = 'https://linux.do/t/' + (slug ? slug + '/' : '') + t.id;
-      if (seen.has(itemUrl)) continue; // 跨列表按 URL 去重（最新与热门常有重叠）
+      if (seen.has(itemUrl)) continue; // 跨列表按 URL 去重（各列表常有重叠）
       seen.add(itemUrl);
       out.push({
         title: String(t.title).slice(0, 300),
