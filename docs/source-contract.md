@@ -59,12 +59,13 @@ Host 将模板与源脚本拼接（`program = 模板 + "\n" + 源脚本`）后�
 
 ```js
 // config.json 源行需带 fetch:"browser"（Host 侧跳过 web.fetch/node/curl 直接走浏览器）
-// 粗搜两条路径：latest.json（最新 30 条）+ hot.json（热门，含较早但活跃的话题）；
-// 合并去重、过滤置顶帖；search.json 对匿名请求限流 429，勿用。源行 maxItems 建议 ≥60。
+// 粗搜三条路径：latest.json（最新 30 条）+ hot.json（热门，含较早但活跃的话题）
+// + top.json?period=weekly（本周排行）；合并去重、过滤置顶帖；search.json 对匿名请求限流 429，勿用。
+// 源行 maxItems 建议 ≥90 以容纳合并后的完整列表。
 async function coarseSearch(api) {
   const out = [];
   const seen = new Set();
-  for (const listUrl of ['https://linux.do/latest.json', 'https://linux.do/hot.json']) {
+  for (const listUrl of ['https://linux.do/latest.json', 'https://linux.do/hot.json', 'https://linux.do/top.json?period=weekly']) {
     const page = await fetchPage(api, listUrl);
     const data = parseJsonBody(page.body.content, listUrl.split('/').pop());   // 见下
     const topics = (data.topic_list.topics || [])                              // 注意是 topic_list.topics
