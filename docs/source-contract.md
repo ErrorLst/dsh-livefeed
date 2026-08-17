@@ -55,12 +55,13 @@ Host 将模板与源脚本拼接（`program = 模板 + "\n" + 源脚本`）后�
 
 ## 6. 完整示例：Linux.do（Discourse 论坛，受 Cloudflare 保护）
 
-> ⚠️ linux.do 全站位于 Cloudflare 托管质询之后：纯 HTTP 客户端（web.fetch / Node fetch / curl）走代理也只会拿到 403「Just a moment…」挑战页，直连更是超时。因此示例通过 **Jina Reader**（`https://r.jina.ai/<url>`，服务器端真实浏览器渲染）抓取 Discourse JSON 接口绕过质询。完整脚本见 [linuxdo.js](../examples/sources/linuxdo.js)，要点：
+> ⚠️ linux.do 全站位于 Cloudflare 托管质询之后：纯 HTTP 客户端（web.fetch / Node fetch / curl）走代理也只会拿到 403「Just a moment…」挑战页，直连更是超时；无头浏览器会被识别且质询永不解开。本源在 config.json 配置 `"fetch": "browser"`，由 Host 用**系统 Edge（有头离屏窗口，playwright-core）**直连抓取，走系统代理，不依赖任何第三方服务。完整脚本见 [linuxdo.js](../examples/sources/linuxdo.js)，要点：
 
 ```js
-// 粗搜：Jina 前缀抓 latest.json（全站最新话题；search.json 对匿名请求限流 429，勿用）
+// config.json 源行需带 fetch:"browser"（Host 侧跳过 web.fetch/node/curl 直接走浏览器）
+// 粗搜：latest.json（全站最新话题；search.json 对匿名请求限流 429，勿用）
 async function coarseSearch(api) {
-  const page = await fetchPage(api, 'https://r.jina.ai/https://linux.do/latest.json');
+  const page = await fetchPage(api, 'https://linux.do/latest.json');
   const data = parseJsonBody(page.body.content, 'latest.json');   // 见下
   return (data.topic_list.topics || [])                           // 注意是 topic_list.topics（搜索接口才是顶层 topics）
     .filter((t) => t && t.id && t.title && !t.pinned)             // 过滤置顶帖
@@ -75,23 +76,18 @@ async function coarseSearch(api) {
 // 精搜：话题 JSON → 首帖正文（cooked 为 HTML，用 htmlToText 转文本）
 async function fineSearch(api, item) {
   const id = String(item.url).split('/').pop();
-  const page = await fetchPage(api, 'https://r.jina.ai/https://linux.do/t/' + id + '.json');
+  const page = await fetchPage(api, 'https://linux.do/t/' + id + '.json');
   const data = parseJsonBody(page.body.content, 'topic ' + id);
   const first = data?.post_stream?.posts?.[0];
   if (!first) throw new Error('帖子内容为空: ' + item.url);
   return { text: htmlToText(first.cooked, 8000) };
 }
 
-// Jina 响应 = 固定 Markdown 头（Title:/URL Source:/Markdown Content:）+ 原始 JSON；
-// 源站错误时返回 "Warning: Target URL returned error NNN"，限流时返回 {"failed": …}
+// 浏览器直连的响应应为原始 JSON；若仍停在 CF 质询页，给出可读错误（状态行展示）
 function parseJsonBody(content, what) {
   const raw = String(content || '');
-  if (raw.indexOf('Target URL returned error') >= 0) {
-    const m = raw.match(/error (\d+)/);
-    throw new Error(what + ' 源站错误' + (m ? ' HTTP ' + m[1] : '') + '（可能被限流，请稍后重试）');
-  }
-  if (raw.indexOf('"failed"') >= 0 || raw.indexOf('"FAILED"') >= 0) {
-    throw new Error(what + ' Jina 抓取失败: ' + raw.slice(0, 200));
+  if (raw.indexOf('请稍候') >= 0 || raw.indexOf('Just a moment') >= 0 || raw.indexOf('cf-chl') >= 0) {
+    throw new Error(what + ' 停留在 Cloudflare 质询页（请稍后重试）');
   }
   const start = raw.indexOf('{');
   if (start < 0) throw new Error(what + ' 响应不是 JSON: ' + raw.slice(0, 200));
@@ -105,12 +101,12 @@ function parseJsonBody(content, what) {
 
 ## 7. 受 Cloudflare 保护站点的抓取
 
-**识别**：`fetchPage` 返回的正文以 "Just a moment…" / "Enable JavaScript and cookies to continue" 开头（或含 `cf-chl` / `cType: 'managed'`），且/或状态码 403 → 站点在 Cloudflare 托管质询（Turnstile）之后。此类质询**无法**用加 header 或纯 HTTP 手段绕过，必须由真实浏览器执行 JS。
+**识别**：`fetchPage` 返回的正文以 "Just a moment…" / "Enable JavaScript and cookies to continue"（中文版为「请稍候…」）开头（或含 `cf-chl` / `cType: 'managed'`），且/或状态码 403 → 站点在 Cloudflare 托管质询（Turnstile）之后。此类质询**无法**用加 header 或纯 HTTP 手段绕过（curl 即使带完整浏览器头也 403），无头浏览器会被识别且质询永不解开——必须由**真实有头浏览器**执行 JS。
 
 **可行做法（按优先级）**：
 
-1. **Jina Reader 前缀**（零 Host 改动）：把 URL 前缀为 `https://r.jina.ai/<url>`。Jina 用服务器端真实浏览器渲染，通常能通过质询；响应包一层固定 Markdown 头，从首个 `{` 截取即可还原原始 JSON（API 型站点）或直接 `htmlToText`（HTML 型站点）。免费档约 20 请求/分钟，注意控制每周期请求数（1 次粗搜 + 精搜候选数）。
-2. 源站自身的 JSON 接口若被限流（Discourse 的 `search.json` 对匿名请求 429），改用无需查询词的列表接口（如 `latest.json`）并过滤置顶帖。
-3. 仍不可用时考虑 Host 侧真实浏览器兜底（如 Playwright），属 Host 改动，仅作后续选项。
+1. **Host 浏览器抓取（首选，无第三方）**：源行配置 `"fetch": "browser"` → Host 用 playwright-core 调**系统 Edge/Chrome（有头、离屏窗口）**直连抓取，走系统代理（不硬编码代理地址）。实测对 linux.do 秒级放行；浏览器会话整周期复用、空闲 90s 自动关闭、profile 存于 `CONFIG_DIR\edge-profile`（cookie 持久）。代价：每周期短暂出现一个离屏 Edge 窗口（任务栏可见图标）；依赖 playwright-core（npm 锁版本）。
+2. **Jina Reader 前缀**（零 Host 改动，第三方备选）：把 URL 前缀为 `https://r.jina.ai/<url>`。Jina 用服务器端真实浏览器渲染，通常能通过质询；响应包一层固定 Markdown 头（`Title:`/`URL Source:`/`Markdown Content:`），从首个 `{` 截取即可还原原始 JSON。免费档约 20 请求/分钟，注意控制每周期请求数；源站限流（`{"failed":…}` / "Target URL returned error NNN"）时给出可读报错。
+3. 源站自身的 JSON 接口若被限流（Discourse 的 `search.json` 对匿名请求 429），改用无需查询词的列表接口（如 `latest.json`）并过滤置顶帖。
 
-源脚本内不要硬编码代理地址：抓取始终走 `api.fetchContent` 的现有链路（curl 自动继承环境变量代理）。
+源脚本内不要硬编码代理地址：抓取始终走 `api.fetchContent` 的现有链路（curl 自动继承环境变量代理；浏览器走系统代理）。
