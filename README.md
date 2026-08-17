@@ -1,4 +1,4 @@
-﻿# dsh-livefeed · 实时讯息面板
+# dsh-livefeed · 实时讯息面板
 
 > DSH（DeepSeek Harness）动态 Cordis 插件：在 GUI **右边缘的悬浮面板**（可折叠）中，每隔可配置的时间（默认 60 分钟）从可配置的「搜索源脚本」采集你感兴趣的内容，由大模型筛选并生成**摘要卡片**；点击卡片在新标签页打开原文。
 
@@ -24,9 +24,15 @@
 
 ## 快速开始
 
-### 1. 安装（动态 Cordis 插件）
+### 1. 安装
 
-本项目是插件的源码仓库；运行时代码以动态 Cordis 插件形式注入当前 DSH 进程：
+**方式 A：Bundle 安装（推荐，开箱即用）**
+
+1. `git clone` 本仓库到本地目录（如 `C:\Users\you\dsh-livefeed`），在该目录执行 `pnpm install`；
+2. 在 web profile（`~/.dsh/profiles/web/`）的 `dsh.profile.bundles` 中加入一行 `"@dsh-external/dsh-livefeed": "link:<仓库绝对路径>"`（或在 `cordis.patch.yml` 中 `insert` 一行 `dsh-livefeed`）；
+3. 重启 dsh web，按下一节初始化运行目录即可。
+
+**方式 B：动态 Cordis 插件（开发模式）**
 
 1. 将 `src/host/plugin.js` 的函数体作为 `code.host`、`src/client/plugin.js` 的函数体作为 `code.client`，通过 `cordis_define` 定义插件（idPrefix 为 `live`）；
 2. `cordis_run` 激活；首次运行需在 GUI 中批准 Client 包；
@@ -34,21 +40,32 @@
 
 > 部署细节与版本管理见 [docs/design.md](docs/design.md#部署与生命周期)。
 
-### 2. 配置文件
+### 2. 初始化运行目录（首次使用）
 
-默认配置目录：`<工作区>\.dsh\dsh-livefeed\`（Host 源码中的常量，可按需修改）。
+运行目录默认是 `~/.dsh/dsh-livefeed`（Windows 为 `%USERPROFILE%\.dsh\dsh-livefeed`；可用环境变量 `DSH_LIVEFEED_DIR` 覆盖，例如迁移历史数据时 `setx DSH_LIVEFEED_DIR <旧目录>`）。
+
+首次使用需要两步：
+
+1. 把本仓库 [`sources/`](sources/) 下的文件复制到运行目录的 `sources/`（内含基类模板 `_template.js` 与 5 个内置源：Hacker News / Linux Do / V2EX / Solidot / arXiv；基类模板缺失时会回退内置模板，但源脚本必须就位）；
+2. 复制 [`examples/config.example.json`](examples/config.example.json) 为运行目录下的 `config.json`，按需修改兴趣词与模型（`model: null` 表示跟随 DSH 默认模型）。
+
+重启 dsh web 后打开面板点「立即刷新」即可开始采集。
+
+### 3. 配置文件
+
+运行目录结构：
 
 | 文件 | 说明 |
 | --- | --- |
 | `config.json` | 全局配置：刷新间隔、兴趣、模型、搜索源列表 |
-| `sources/_template.js` | （可选）自定义基类模板；缺省使用内置模板 |
+| `sources/_template.js` | （可选）自定义基类模板；缺省回退内置模板 |
 | `sources/<源id>.js` | 搜索源脚本，实现 `coarseSearch` / `fineSearch` |
 
 示例配置见 [examples/config.example.json](examples/config.example.json)，示例源见 [examples/sources/](examples/sources/)。
 
-### 3. 新增一个搜索源（三步）
+### 4. 新增一个搜索源（三步）
 
-1. 在 `sources/` 下新建脚本文件；
+1. 在运行目录的 `sources/` 下新建脚本文件；
 2. 实现 `coarseSearch(api)`（必选）；`fineSearch(api, item)` 可选，默认实现为抓取 `item.url` 提取正文；
 3. 在 `config.json` 的 `sources` 数组中加一行（`id`、`name`、`script`、`query`、`enabled`）。
 
@@ -62,9 +79,11 @@ dsh-livefeed/
 │   ├── host/plugin.js          # Host 半（定时采集管线 + RPC）
 │   ├── client/plugin.js        # Client 半（悬浮面板 UI + 轮询）
 │   └── template/template.js    # 搜索源基类模板（内置常量的源头）
+├── sources/                    # 初始运行载荷：复制到运行目录 sources/ 即可用
+│   └── (基类模板 + 内置搜索源)
 ├── examples/
-│   ├── config.example.json     # 配置示例
-│   └── sources/                # 示例搜索源（search-ai / hn / linuxdo）
+│   ├── config.example.json     # 配置示例（复制为运行目录 config.json）
+│   └── sources/                # 示例搜索源参考（含 search-ai 搜索引擎型）
 ├── docs/
 │   ├── design.md               # 设计文档（架构、管线、契约、错误模型、决策记录）
 │   └── source-contract.md      # 搜索源基类模板契约

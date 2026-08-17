@@ -16,12 +16,25 @@ function extractApply(src) {
 
 const host = readFileSync(join(root, 'src', 'host', 'plugin.js'), 'utf8');
 const client = readFileSync(join(root, 'src', 'client', 'plugin.js'), 'utf8');
+// 把基类模板内嵌为内置常量：新安装无需手动放置 sources/_template.js 即可运行
+// （运行目录存在同名文件且含调度器标记时仍优先使用文件版本）。
+const template = readFileSync(join(root, 'src', 'template', 'template.js'), 'utf8');
+const BUILTIN_TEMPLATE_B64 = Buffer.from(template, 'utf8').toString('base64');
 
 mkdirSync(join(root, 'lib'), { recursive: true });
 
+function buildHost() {
+  const body = extractApply(host).replace(
+    /const BUILTIN_TEMPLATE = '';/,
+    `const BUILTIN_TEMPLATE = atob('${BUILTIN_TEMPLATE_B64}');`,
+  );
+  if (body.indexOf('BUILTIN_TEMPLATE = atob') < 0) throw new Error('BUILTIN_TEMPLATE 占位符未找到');
+  return body;
+}
+
 writeFileSync(
   join(root, 'lib', 'index.mjs'),
-  `const name = "dsh-livefeed";\nconst inject = ["timer", "web", "llm", "fs", "agentDefaultModel", "webServer"];\nfunction apply(ctx) {\n${extractApply(host)}\n}\nexport { apply, inject, name };\n`
+  `const name = "dsh-livefeed";\nconst inject = ["timer", "web", "llm", "fs", "agentDefaultModel", "webServer"];\nfunction apply(ctx) {\n${buildHost()}\n}\nexport { apply, inject, name };\n`
 );
 
 writeFileSync(

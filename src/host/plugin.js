@@ -41,8 +41,9 @@ return {
     const TICK_MS = 30 * 1000; // 调度器基础节拍（实际周期由 config.intervalMinutes 决定）
 
     // ══ 基类模板 ══
-    // 基类模板：以运行目录 sources/_template.js 为主要来源（项目初始化时已就位）。
-    // 如需内置常量兜底：将 src/template/template.js 的内容 btoa 后内联到此处。
+    // 基类模板：优先用运行目录 sources/_template.js（可覆盖定制）；
+    // 缺失时回退内置常量 BUILTIN_TEMPLATE —— 由 scripts/build-lib.js 在构建时
+    // 自动把 src/template/template.js 以 base64 内联（此处源码恒为空串）。
     const BUILTIN_TEMPLATE = '';
 
     // ══ 运行时状态（进程内存）══
