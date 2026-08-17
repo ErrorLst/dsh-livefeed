@@ -31,6 +31,15 @@ async function coarseSearch(api) {
       });
     }
   }
+  // arXiv RSS 按旧→新排列且论文会存续数天：排序让最新论文在前，
+  // 保证 maxCandidates 名额优先留给新论文（旧文已被 seenUrls 去重跳过）。
+  out.sort((a, b) => {
+    const ta = Date.parse(a.publishedAt || '');
+    const tb = Date.parse(b.publishedAt || '');
+    const na = isNaN(ta) ? -Infinity : ta;
+    const nb = isNaN(tb) ? -Infinity : tb;
+    return nb - na;
+  });
   return out;
 }
 
