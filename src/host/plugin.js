@@ -503,11 +503,15 @@ return {
       const list = kept.map((it, i) => ({ i, title: it.title, url: it.url, snippet: String(it.snippet || '').slice(0, 200) }));
       const recent = state.feedbackQueue.slice(-10).map((f) => '【不感兴趣】' + f.title);
       const system =
-        '你是信息筛选助手。用户配置的兴趣与规则如下，判断哪些条目值得精读并生成摘要卡片。' +
+        '你是信息筛选助手。用户配置了兴趣词，判断哪些条目值得精读并生成摘要卡片。' +
         '\n兴趣: ' + JSON.stringify(state.config.interests || []) +
         '\n规则: ' + JSON.stringify({ prefer: state.preferences.prefer || [], block: effectiveBlock, semanticNotes: state.preferences.semanticNotes || '' }) +
         '\n最近不感兴趣样本: ' + JSON.stringify(recent) +
-        '\n只输出 JSON: {"selected":[{"index":0,"reason":"一句话理由"}]}。宁可少选，不选明显无关或与样本相似的内容。';
+        '\n判定标准：与任一兴趣词相关的条目都应入选。相关不仅指标题字面命中，还包括衍生主题' +
+        '（例如兴趣「AI」涵盖模型/工具/应用/公司动态/LLM 与 Agent/开发者生态；「计算机」涵盖编程、软件、硬件、网络、科技新闻；其他兴趣同理）。' +
+        '只有明显与所有兴趣都不相关的条目才拒绝；拿不准时倾向入选（宁可多选）。' +
+        '用户可在面板对多余条目标记「不感兴趣」，系统会据此学习收紧，无需你过度保守。' +
+        '\n只输出 JSON: {"selected":[{"index":0,"reason":"一句话理由"}]}。';
       let parsed = null;
       // 思考等级较高时输出预算可能被思考过程占用导致 JSON 截断；重试逐次加大预算
       const budgets = [4000, 6000, 8000];
