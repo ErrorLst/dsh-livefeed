@@ -14,7 +14,15 @@ return {
   inject: ['timer', 'web', 'llm', 'fs', 'agentDefaultModel', 'webServer'],
   apply(ctx) {
     // ══ 常量 ══
-    const CONFIG_DIR = 'C:\\Users\\zhoujin\\Pictures\\dsh-workspace\\.dsh\\dsh-livefeed';
+    // 配置目录解析（跨机器可移植，不硬编码本机路径）：
+    // 1) 环境变量 DSH_LIVEFEED_DIR 优先（本机历史数据迁移：setx DSH_LIVEFEED_DIR <旧目录>）；
+    // 2) 否则默认 <用户主目录>\.dsh\dsh-livefeed。
+    const CONFIG_DIR = (() => {
+      const env = (typeof process !== 'undefined' && process.env) ? process.env : null;
+      if (env && env.DSH_LIVEFEED_DIR) return String(env.DSH_LIVEFEED_DIR).replace(/[\\/]+$/, '');
+      const home = (env && (env.USERPROFILE || env.HOME)) || '.';
+      return home + '\\.dsh\\dsh-livefeed';
+    })();
     const CONFIG_FILE = CONFIG_DIR + '\\config.json';
     const STATE_FILE = CONFIG_DIR + '\\state.json';
     const HISTORY_FILE = CONFIG_DIR + '\\history.jsonl';
@@ -1198,6 +1206,7 @@ return {
 
     // ══ 启动：装载 + HTTP 路由 + 动态 harness + 定时器（随 fiber 自动清理）══
     ctx.effect(() => {
+      console.log('[dsh-livefeed] config dir:', CONFIG_DIR);
       loadAll();
 
       // HTTP API（bundle 模式客户端使用）

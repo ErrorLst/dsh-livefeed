@@ -1,4 +1,4 @@
-﻿# LiveFeed 设计文档
+# LiveFeed 设计文档
 
 > 状态：v1 实现完成（Host/Client 代码就绪，动态插件部署验证中）
 > 关联文档：[搜索源基类模板契约](source-contract.md) · [HTML 原型](../prototype/prototype.html)
@@ -93,7 +93,7 @@
 - 动态插件定义：`cordis_define`（idPrefix `live`），Host 半 = `src/host/plugin.js` 函数体，Client 半 = `src/client/plugin.js` 函数体；`cordis_run` 激活。
 - 依赖注入：`inject: ['timer','web','llm','fs','agentDefaultModel']`；`codeRuntime`、`shell` 用 `ctx.get()` 可选读取（`codeRuntime` 缺失时回退 `shell.run('node <script>')` 执行源脚本、解析 stdout JSON）。
 - 副作用归属：定时器经 `ctx.effect(() => ctx.interval(...))`；RPC 经 `harness.handle`；UI 经 `slots.inject` 注册 —— 插件 stop/update 时全部自动清理。
-- 配置目录常量：`C:\Users\zhoujin\Pictures\dsh-workspace\.dsh\dsh-livefeed`（可改）。
+- 配置目录解析：环境变量 `DSH_LIVEFEED_DIR` 优先，否则默认 `<用户主目录>\.dsh\dsh-livefeed`（不硬编码本机路径；历史数据迁移用 `setx DSH_LIVEFEED_DIR <旧目录>`）。
 
 ## 6. RPC 契约（Package 私有）
 
