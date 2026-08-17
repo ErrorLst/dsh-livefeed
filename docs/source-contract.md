@@ -59,18 +59,24 @@ Host 将模板与源脚本拼接（`program = 模板 + "\n" + 源脚本`）后�
 
 ```js
 // config.json 源行需带 fetch:"browser"（Host 侧跳过 web.fetch/node/curl 直接走浏览器）
-// 粗搜：latest.json（全站最新话题；search.json 对匿名请求限流 429，勿用）
+// 粗搜两条路径：latest.json（最新 30 条）+ hot.json（热门，含较早但活跃的话题）；
+// 合并去重、过滤置顶帖；search.json 对匿名请求限流 429，勿用。源行 maxItems 建议 ≥60。
 async function coarseSearch(api) {
-  const page = await fetchPage(api, 'https://linux.do/latest.json');
-  const data = parseJsonBody(page.body.content, 'latest.json');   // 见下
-  return (data.topic_list.topics || [])                           // 注意是 topic_list.topics（搜索接口才是顶层 topics）
-    .filter((t) => t && t.id && t.title && !t.pinned)             // 过滤置顶帖
-    .map((t) => ({
-      title: t.title,
-      url: 'https://linux.do/t/' + (t.slug ? t.slug + '/' : '') + t.id,
-      snippet: t.blurb || '',
-      publishedAt: t.created_at || undefined,
-    }));
+  const out = [];
+  const seen = new Set();
+  for (const listUrl of ['https://linux.do/latest.json', 'https://linux.do/hot.json']) {
+    const page = await fetchPage(api, listUrl);
+    const data = parseJsonBody(page.body.content, listUrl.split('/').pop());   // 见下
+    const topics = (data.topic_list.topics || [])                              // 注意是 topic_list.topics
+      .filter((t) => t && t.id && t.title && !t.pinned);                       // 过滤置顶帖
+    for (const t of topics) {
+      const itemUrl = 'https://linux.do/t/' + (t.slug ? t.slug + '/' : '') + t.id;
+      if (seen.has(itemUrl)) continue;                                         // 跨列表去重
+      seen.add(itemUrl);
+      out.push({ title: t.title, url: itemUrl, snippet: t.blurb || '', publishedAt: t.created_at || undefined });
+    }
+  }
+  return out;
 }
 
 // 精搜：话题 JSON → 首帖正文（cooked 为 HTML，用 htmlToText 转文本）

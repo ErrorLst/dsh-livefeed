@@ -1,28 +1,38 @@
-/* LiveFeed 示例源：Linux Do 论坛（linux.do，Discourse）
+/* LiveFeed 源：Linux Do 论坛（linux.do，Discourse）
  *
  * 背景：linux.do 全站位于 Cloudflare 托管质询之后，纯 HTTP 客户端一律 403。
  * config.json 本源行配置 "fetch": "browser" → Host 用系统 Edge（有头离屏，
  * playwright-core）直连抓取，走系统代理，不依赖任何第三方服务。
  *
- * - coarseSearch：latest.json（全站最新话题，约 30 条）→ 过滤置顶帖 → 标题/链接/简介/时间
- *   （linux.do 的 search.json 对匿名请求限流 429，故不使用搜索接口；config 的 query 留空）
- * - fineSearch：话题 JSON（/t/{id}.json）→ 首帖 cooked(HTML) 转文本
+ * 粗搜两条路径（顺序：最新在前，热门补足；跨列表去重）：
+ * 1. latest.json —— 全站最新 30 条话题；
+ * 2. hot.json —— 热门话题（heat 热度排序，含较早发布但仍在活跃的话题，
+ *    补上「最新 30 条」错过的时间窗外的热门内容）。
+ * 两列表均过滤置顶帖；config 的 maxItems 决定合并后送入筛选的总数（建议 ≥60）。
+ * （linux.do 的 search.json 对匿名请求限流 429，故不使用搜索接口；query 留空）
+ * 精搜：话题 JSON（/t/{id}.json）→ 首帖 cooked(HTML) 转文本
  */
 async function coarseSearch(api) {
-  const page = await fetchPage(api, 'https://linux.do/latest.json');
-  const data = parseJsonBody(page.body.content, 'latest.json');
-  const topics = (data && data.topic_list && data.topic_list.topics) || [];
   const out = [];
-  for (const t of topics) {
-    if (!t || !t.id || !t.title) continue;
-    if (t.pinned) continue; // 置顶帖（论坛公告等）每周期重复出现，跳过
-    const slug = String(t.slug || '');
-    out.push({
-      title: String(t.title).slice(0, 300),
-      url: 'https://linux.do/t/' + (slug ? slug + '/' : '') + t.id,
-      snippet: String(t.blurb || '').slice(0, 500),
-      publishedAt: t.created_at || undefined,
-    });
+  const seen = new Set();
+  for (const listUrl of ['https://linux.do/latest.json', 'https://linux.do/hot.json']) {
+    const page = await fetchPage(api, listUrl);
+    const data = parseJsonBody(page.body.content, listUrl.split('/').pop());
+    const topics = (data && data.topic_list && data.topic_list.topics) || [];
+    for (const t of topics) {
+      if (!t || !t.id || !t.title) continue;
+      if (t.pinned) continue; // 置顶帖（论坛公告等）每周期重复出现，跳过
+      const slug = String(t.slug || '');
+      const itemUrl = 'https://linux.do/t/' + (slug ? slug + '/' : '') + t.id;
+      if (seen.has(itemUrl)) continue; // 跨列表按 URL 去重（最新与热门常有重叠）
+      seen.add(itemUrl);
+      out.push({
+        title: String(t.title).slice(0, 300),
+        url: itemUrl,
+        snippet: String(t.blurb || '').slice(0, 500),
+        publishedAt: t.created_at || undefined,
+      });
+    }
   }
   return out;
 }
