@@ -397,6 +397,27 @@ return {
       })().finally(() => { s.starting = null; });
       return s.starting;
     }
+    // 重置浏览器档案：关会话 → 等进程释放文件句柄 → 删除 profile 目录（下次请求自动重建全新档案）。
+    // 用途：CF 质询「cookie 监狱」自愈 —— 代理出口 IP 变更后，旧 profile 里失效的
+    // cf_clearance/__cf_bm 会让质询页永不通过（实测：全新档案同 IP 秒过，旧档案 403 卡死）。
+    async function resetBrowserProfile() {
+      await closeBrowserSession();
+      await new Promise((r) => { try { ctx.timeout(r, 1500); } catch (_) { r(); } });
+      const shell = ctx.get('shell');
+      if (shell === undefined) { browserLog('shell 不可用，无法重置档案'); return; }
+      try {
+        const spec = shell.resolve({
+          command: 'cmd /c if exist "' + BROWSER_PROFILE_DIR + '" rd /s /q "' + BROWSER_PROFILE_DIR + '"',
+          timeoutMs: 30000,
+          stdoutMaxBytes: 10000,
+          sandboxPolicy: { mode: 'danger-full-access' },
+        });
+        await shell.run(spec);
+        browserLog('档案已重置（下次启动自动重建全新 Edge profile）');
+      } catch (err) {
+        console.error('[dsh-livefeed] 档案重置失败:', String((err && err.message) || err));
+      }
+    }
     async function fetchViaBrowser(url) {
       let page;
       try {
@@ -407,25 +428,48 @@ return {
         page = await getBrowserPage();
       }
       touchBrowserSession();
-      const isChal = (s) => s.indexOf('请稍候') >= 0 || s.indexOf('Just a moment') >= 0 || s.indexOf('cf-chl') >= 0;
-      await page.goto(String(url), { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => { /* 慢加载也继续取内容 */ });
-      let text = await page.evaluate(() => (document.body && document.body.innerText) || '').catch(() => '');
-      for (let i = 0; i < 4 && isChal(text); i++) {
-        await page.waitForTimeout(5000).catch(() => { /* ignore */ });
-        text = await page.evaluate(() => (document.body && document.body.innerText) || '').catch(() => '');
+      const chalText = (s) => s.indexOf('请稍候') >= 0 || s.indexOf('Just a moment') >= 0 || s.indexOf('cf-chl') >= 0;
+      // 新版 CF 托管质询页 body 为空、只有标题「请稍候…」：判定必须同时看标题，
+      // 否则空正文会被误报成「浏览器抓取内容为空」。
+      const readState = async () => ({
+        text: await page.evaluate(() => (document.body && document.body.innerText) || '').catch(() => ''),
+        title: await page.title().catch(() => ''),
+      });
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          await page.goto(String(url), { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => { /* 慢加载也继续取内容 */ });
+          let st = await readState();
+          for (let i = 0; i < 4 && (chalText(st.text) || chalText(st.title)); i++) {
+            await page.waitForTimeout(5000).catch(() => { /* ignore */ });
+            st = await readState();
+          }
+          if (chalText(st.text) || chalText(st.title)) {
+            browserLog('CF 质询未通过，重置浏览器档案后重试');
+            await resetBrowserProfile();
+            page = await getBrowserPage();
+            touchBrowserSession();
+            continue; // 第二轮使用全新档案
+          }
+          let t = String(st.text || '').trim();
+          if (t && t[0] !== '{' && t[0] !== '[') {
+            // JSON 端点偶发被 <pre> 包裹渲染：从 DOM 里兜底提取
+            const html = await page.content().catch(() => '');
+            const m = html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
+            if (m) t = m[1].trim();
+          }
+          if (!t) throw new Error('浏览器抓取内容为空');
+          let truncated = false;
+          if (t.length > 1200000) { t = t.slice(0, 1200000); truncated = true; }
+          return { url: String(url), statusCode: 200, body: { kind: 'text', content: t }, truncated };
+        } catch (err) {
+          if (attempt === 1) throw err;
+          browserLog('抓取异常，重置浏览器档案后重试: ' + String((err && err.message) || err).split('\n')[0]);
+          await resetBrowserProfile();
+          page = await getBrowserPage();
+          touchBrowserSession();
+        }
       }
-      if (isChal(text)) throw new Error('仍停在 Cloudflare 质询页（有头模式被拦截）');
-      let t = String(text || '').trim();
-      if (t && t[0] !== '{' && t[0] !== '[') {
-        // JSON 端点偶发被 <pre> 包裹渲染：从 DOM 里兜底提取
-        const html = await page.content().catch(() => '');
-        const m = html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
-        if (m) t = m[1].trim();
-      }
-      if (!t) throw new Error('浏览器抓取内容为空');
-      let truncated = false;
-      if (t.length > 1200000) { t = t.slice(0, 1200000); truncated = true; }
-      return { url: String(url), statusCode: 200, body: { kind: 'text', content: t }, truncated };
+      throw new Error('浏览器抓取失败 ' + String(url));
     }
 
     // ══ 源脚本执行（codeRuntime；缺失时报错并跳过该源）══
