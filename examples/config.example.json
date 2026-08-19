@@ -1,22 +1,10 @@
 {
-  "intervalMinutes": 60,
-  "maxCards": 8,
-  "maxCandidatesPerSource": 10,
-  "maxCoarseItems": 30,
+  "intervalMinutes": 30,
+  "fetchCount": 40,
+  "outputCount": 8,
   "summaryLanguage": "zh-CN",
-  "interests": ["AI", "计算机", "工业视觉"],
-  "blockWords": [],
-  "archiveMaxEntries": 5000,
   "model": null,
   "sources": [
-    {
-      "id": "hn",
-      "name": "Hacker News",
-      "script": "sources/hn.js",
-      "query": "",
-      "enabled": true,
-      "maxCandidates": 5
-    },
     {
       "id": "linuxdo",
       "name": "Linux Do",
@@ -24,35 +12,7 @@
       "query": "",
       "enabled": true,
       "fetch": "browser",
-      "maxItems": 100,
-      "maxCandidates": 15
-    },
-    {
-      "id": "v2ex",
-      "name": "V2EX 热帖",
-      "script": "sources/v2ex.js",
-      "query": "",
-      "enabled": true,
-      "maxItems": 10,
-      "maxCandidates": 4
-    },
-    {
-      "id": "solidot",
-      "name": "Solidot",
-      "script": "sources/solidot.js",
-      "query": "",
-      "enabled": true,
-      "maxItems": 20,
-      "maxCandidates": 4
-    },
-    {
-      "id": "arxiv",
-      "name": "arXiv",
-      "script": "sources/arxiv.js",
-      "query": "cs.AI,cs.CV,cs.LG",
-      "enabled": true,
-      "maxItems": 30,
-      "maxCandidates": 4
+      "maxItems": 200
     }
   ]
 }

@@ -1,5 +1,11 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * dsh-livefeed Host 半（v1.2：bundle 化）
+ * dsh-livefeed Host 半（v2：Linux Do 专用精简版）
+ * - 源固定为 Linux Do（linux.do），从「最新 + 最热门」拉取话题；
+ * - 固定屏蔽「富可敌国」标签的推广话题（确定性过滤，不经 AI）；
+ * - 其余话题由 AI 按「价值」筛选（回复数/浏览量/内容质量等，不按主题/关键词），
+ *   输出数量贴近预设 outputCount；拉取数量 ≤ 输出数量时跳过 AI 过滤；
+ * - 拉取时按已读 URL（seenUrls）去重，不重复采集；
+ * - 配置只保留两个参数：fetchCount（拉取数量）、outputCount（输出数量）。
  * - bundle 模式：lib/index.mjs 由此文件生成（export { name, inject, apply }）；
  *   经 profile bundle + cordis.patch.yml 挂载，注册 HTTP API（/api/dsh-livefeed）。
  * - 动态模式（cordis_define code.host）：本函数体同样可用；harness 分支自动启用。
@@ -8,15 +14,11 @@
  *   真实宿主插件模式：Node 全局可用（Buffer 等），无 harness（typeof 守卫）；
  * - 依赖服务：timer, web, llm, fs, agentDefaultModel, webServer（inject 硬依赖）；
  *   codeRuntime, shell（ctx.get 可选读取）。
- * 设计依据：docs/design.md（§3 管线、§6 RPC、§7 状态/反馈/规则学习）。
  */
 return {
   inject: ['timer', 'web', 'llm', 'fs', 'agentDefaultModel', 'webServer'],
   apply(ctx) {
     // ══ 常量 ══
-    // 配置目录解析（跨机器可移植，不硬编码本机路径）：
-    // 1) 环境变量 DSH_LIVEFEED_DIR 优先（本机历史数据迁移：setx DSH_LIVEFEED_DIR <旧目录>）；
-    // 2) 否则默认 <用户主目录>/.dsh/dsh-livefeed。
     const CONFIG_DIR = (() => {
       const env = (typeof process !== 'undefined' && process.env) ? process.env : null;
       if (env && env.DSH_LIVEFEED_DIR) return String(env.DSH_LIVEFEED_DIR).replace(/[\\/]+$/, '');
@@ -26,22 +28,22 @@ return {
     const CONFIG_FILE = CONFIG_DIR + '/config.json';
     const STATE_FILE = CONFIG_DIR + '/state.json';
     const HISTORY_FILE = CONFIG_DIR + '/history.jsonl';
-    const PREFERENCES_FILE = CONFIG_DIR + '/preferences.json';
     const TEMPLATE_FILE = CONFIG_DIR + '/sources/_template.js';
     const ROUTE_PATH = '/api/dsh-livefeed';
-    const DEFAULT_INTERVAL_MIN = 60;
-    const DEFAULT_MAX_CARDS = 8;
-    const DEFAULT_MAX_CANDIDATES = 5;
-    const DEFAULT_MAX_ITEMS = 15; // 粗搜默认上限（与模板 DEFAULT_MAX_ITEMS 同值）
-    const DEFAULT_ARCHIVE_MAX = 5000;
-    const FEEDBACK_WINDOW = 50;
-    const FILTER_LOG_CAP = 200;
+    const DEFAULT_INTERVAL_MIN = 30;
+    const DEFAULT_FETCH_COUNT = 40;   // 拉取数量：单次从最新+最热门共拉取的话题数
+    const DEFAULT_OUTPUT_COUNT = 8;   // 输出数量：AI 价值筛选后输出的卡片数
+    const CARD_BOUND = 300;           // 面板卡片内存上限（超出裁剪最老已读）
     const RETRY_MAX = 2;
     const RETRY_BASE_MS = 5 * 60 * 1000;
-    const TICK_MS = 30 * 1000; // 调度器基础节拍（实际周期由 config.intervalMinutes 决定）
+    const TICK_MS = 30 * 1000;        // 调度器基础节拍（实际周期由 config.intervalMinutes 决定）
+    // 固定屏蔽标签：只屏蔽「富可敌国」话题（用户要求：仅此一个过滤）。
+    // 命中口径：标签含「富可敌国」，或标题任意位置含「富可敌国」（直接子串匹配，无需括号）。
+    // 其他标签/主题一概不在此过滤，交给 AI 价值筛选。
+    const BLOCK_TAGS = ['富可敌国'];
 
     // ══ 基类模板 ══
-    // 基类模板：优先用运行目录 sources/_template.js（可覆盖定制）；
+    // 优先用运行目录 sources/_template.js（可覆盖定制）；
     // 缺失时回退内置常量 BUILTIN_TEMPLATE —— 由 scripts/build-lib.js 在构建时
     // 自动把 src/template/template.js 以 base64 内联（此处源码恒为空串）。
     const BUILTIN_TEMPLATE = '';
@@ -49,15 +51,10 @@ return {
     // ══ 运行时状态（进程内存）══
     const state = {
       config: null,          // 当前配置（加载失败时用内置默认）
-      cards: [],             // 面板卡片（未读 + 不感兴趣 + 有界已读）
+      cards: [],             // 面板卡片（未读 + 有界已读）
       seenUrls: new Set(),   // 持久去重集合（启动装载，周期追加）
-      archive: [],           // history.jsonl 内存镜像（有界）
-      preferences: null,     // 规则文档（AI 维护 + 用户可编辑）
-      exemptUrls: new Set(), // 豁免集（撤销屏蔽）
-      feedbackQueue: [],     // 未消费的「不感兴趣」标记（有界，规则学习消费）
-      filterLog: [],         // 被屏蔽内容（内存，有界；标题为 AI 译文）
-      pendingRejected: [],   // 本周期待翻译的被拒条目（周期结束批量翻译后写入 filterLog）
-      titleCache: new Map(), // 标题译文缓存（url(normalized) → 译文，防重复翻译）
+      archive: [],           // history.jsonl 内存镜像（有界，去重依据）
+      sourceErrors: [],      // 本周期源错误
       cycleStats: null,      // {scanned, selected, filtered}
       progress: null,        // {stage, detail, ts} 当前管线阶段（面板进度显示）
       running: false,
@@ -65,10 +62,9 @@ return {
       retrying: 0,
       lastRunAt: undefined,
       lastError: undefined,
-      sourceErrors: [],
       tick: 0,
       mid: 0,                // 消息 id 计数器
-      cycleStamp: null,      // 当前刷新周期时间戳（卡片/屏蔽条目按它分组折叠，重启后依旧唯一可排序）
+      cycleStamp: null,      // 当前刷新周期时间戳（卡片按它分组折叠）
     };
     let disposed = false;
 
@@ -112,28 +108,33 @@ return {
     function defaultConfig() {
       return {
         intervalMinutes: DEFAULT_INTERVAL_MIN,
-        maxCards: DEFAULT_MAX_CARDS,
-        maxCandidatesPerSource: DEFAULT_MAX_CANDIDATES,
-        maxCoarseItems: DEFAULT_MAX_ITEMS,
+        fetchCount: DEFAULT_FETCH_COUNT,
+        outputCount: DEFAULT_OUTPUT_COUNT,
         summaryLanguage: 'zh-CN',
-        interests: [],
-        blockWords: [],
-        archiveMaxEntries: DEFAULT_ARCHIVE_MAX,
         model: null,
         sources: [],
       };
-    }
-    function defaultPreferences() {
-      return { version: 1, updatedAt: undefined, prefer: [], block: [], sourceWeights: {}, semanticNotes: '' };
     }
     function mergeConfig(base, cfg) {
       if (!cfg || typeof cfg !== 'object') return base;
       const out = {};
       for (const k of Object.keys(base)) out[k] = cfg[k] !== undefined ? cfg[k] : base[k];
       if (!Array.isArray(out.sources)) out.sources = [];
-      if (!Array.isArray(out.interests)) out.interests = [];
-      if (!Array.isArray(out.blockWords)) out.blockWords = [];
       return out;
+    }
+    // 固定源：Linux Do（config.json 中 id=linuxdo 的条目；缺省用内置默认）
+    function linuxdoSource(cfg) {
+      const list = (cfg && Array.isArray(cfg.sources)) ? cfg.sources : [];
+      const found = list.find((s) => s && String(s.id) === 'linuxdo');
+      return Object.assign({
+        id: 'linuxdo',
+        name: 'Linux Do',
+        script: 'sources/linuxdo.js',
+        query: '',
+        enabled: true,
+        fetch: 'browser',
+        maxItems: 200,
+      }, found || {});
     }
 
     // ══ URL 归一化（正则实现）══
@@ -244,8 +245,6 @@ return {
       return code ? m + ' (' + code + ')' : m;
     }
     async function fetchContentImpl(url, opts) {
-      // 源级 fetch:"browser"：直接走系统 Edge 有头离屏抓取（CF 托管质询站点专用，
-      // 纯 HTTP 客户端一律 403、无头浏览器被识别；跳过 web.fetch/node/curl 的超时浪费）
       if (opts && opts.viaBrowser) {
         try {
           return await fetchViaBrowser(String(url));
@@ -254,9 +253,6 @@ return {
         }
       }
       const reasons = [];
-      // 本机配置了代理环境变量时，直连（web.fetch / node fetch）对外部站点几乎必超时，
-      // 白等 20-40s/条后才轮到 curl（自动继承代理）成功 —— 直接跳过直连层走 curl。
-      // 无代理环境变量的部署保持原链路：web.fetch → node fetch → curl。
       const proxyEnv = (typeof process !== 'undefined' && process.env)
         && (process.env.HTTP_PROXY || process.env.HTTPS_PROXY || process.env.http_proxy || process.env.https_proxy);
       if (proxyEnv) {
@@ -285,9 +281,6 @@ return {
       }
       throw new Error('抓取失败 ' + String(url) + '（' + reasons.join('；') + '）');
     }
-    // Node 内置 fetch（bundle 模式运行在真实 Node 进程）：免 bash/curl/沙箱依赖，
-    // 本机直连即可；动态模式无 fetch 全局时自动跳过。
-    // 自动重试一次；失败信息带 cause.code（ECONNREFUSED/ECONNRESET/ETIMEDOUT 等），便于定位网络/代理问题。
     async function fetchViaNode(url) {
       if (typeof fetch !== 'function') throw new Error('Node fetch 不可用');
       let lastErr = null;
@@ -316,11 +309,6 @@ return {
       const shell = ctx.get('shell');
       if (shell === undefined) throw new Error('web.fetch 与 shell 均不可用');
       const safeUrl = String(url).replace(/"/g, '%22');
-      // 本机 shell 服务是 PowerShell（dsh-pwsh-sandbox）：`curl` 会被解析成 Invoke-WebRequest 别名，
-      // 因此必须显式用 `curl.exe` 调用真实 curl。
-      // 本机沙箱后端（windows-acl）要求临时目录在 workspace 之外；当 workspace 位于用户主目录时不可用，
-      // 部署默认的 workspace-write 策略会直接失败。此处仅对本抓取调用显式使用 danger-full-access
-      // （pwsh-sandbox 对 danger-full-access 直接放行、不套沙箱），不改动部署默认策略。
       const spec = shell.resolve({
         command: 'curl.exe -sL --max-time 20 --compressed -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36" "' + safeUrl + '"',
         timeoutMs: 30000,
@@ -343,7 +331,7 @@ return {
     }
 
     // ══ 浏览器抓取：playwright-core + 系统 Edge（有头离屏窗口）══
-    // 背景：linux.do 等站点位于 Cloudflare 托管质询之后 —— web.fetch/node fetch/curl 一律 403
+    // 背景：linux.do 位于 Cloudflare 托管质询之后 —— web.fetch/node fetch/curl 一律 403
     // 「Just a moment…」，无头浏览器被识别且质询永不解开；实测有头（离屏）直接放行。
     // 源级配置 fetch:"browser" 启用；浏览器走系统代理（不硬编码代理地址）。
     const BROWSER_PROFILE_DIR = CONFIG_DIR + '/edge-profile';
@@ -358,7 +346,6 @@ return {
       if (c) { try { await c.close(); } catch (_) { /* ignore */ } }
     }
     function touchBrowserSession() {
-      // 重置空闲计时：空闲 BROWSER_IDLE_MS 后自动关闭（下一次请求会重新拉起）
       const s = browserSession;
       if (s.idleStop) { try { s.idleStop(); } catch (_) { /* ignore */ } s.idleStop = null; }
       if (!s.ctx) return;
@@ -381,7 +368,7 @@ return {
           try {
             const c = await pw.chromium.launchPersistentContext(BROWSER_PROFILE_DIR, {
               channel,
-              headless: false, // 有头是硬要求：无头被 CF 识别；窗口置于屏幕外
+              headless: false,
               args: ['--no-first-run', '--disable-gpu', '--window-position=-32000,-32000', '--window-size=1280,800'],
               viewport: { width: 1280, height: 800 },
               locale: 'zh-CN',
@@ -397,9 +384,6 @@ return {
       })().finally(() => { s.starting = null; });
       return s.starting;
     }
-    // 重置浏览器档案：关会话 → 等进程释放文件句柄 → 删除 profile 目录（下次请求自动重建全新档案）。
-    // 用途：CF 质询「cookie 监狱」自愈 —— 代理出口 IP 变更后，旧 profile 里失效的
-    // cf_clearance/__cf_bm 会让质询页永不通过（实测：全新档案同 IP 秒过，旧档案 403 卡死）。
     async function resetBrowserProfile() {
       await closeBrowserSession();
       await new Promise((r) => { try { ctx.timeout(r, 1500); } catch (_) { r(); } });
@@ -423,14 +407,11 @@ return {
       try {
         page = await getBrowserPage();
       } catch (err) {
-        // 可能是残留 Edge 进程占用 profile：清掉会话重试一次
         await closeBrowserSession();
         page = await getBrowserPage();
       }
       touchBrowserSession();
       const chalText = (s) => s.indexOf('请稍候') >= 0 || s.indexOf('Just a moment') >= 0 || s.indexOf('cf-chl') >= 0;
-      // 新版 CF 托管质询页 body 为空、只有标题「请稍候…」：判定必须同时看标题，
-      // 否则空正文会被误报成「浏览器抓取内容为空」。
       const readState = async () => ({
         text: await page.evaluate(() => (document.body && document.body.innerText) || '').catch(() => ''),
         title: await page.title().catch(() => ''),
@@ -448,11 +429,10 @@ return {
             await resetBrowserProfile();
             page = await getBrowserPage();
             touchBrowserSession();
-            continue; // 第二轮使用全新档案
+            continue;
           }
           let t = String(st.text || '').trim();
           if (t && t[0] !== '{' && t[0] !== '[') {
-            // JSON 端点偶发被 <pre> 包裹渲染：从 DOM 里兜底提取
             const html = await page.content().catch(() => '');
             const m = html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
             if (m) t = m[1].trim();
@@ -507,6 +487,8 @@ return {
           fetchContent: async (a) => fetchContentImpl((a || {}).url, {
             viaBrowser: !!(args.config && args.config.fetch === 'browser'),
           }),
+          // 已读/已采集 URL 集合（源脚本据此跳过重复话题，不重复拉取）
+          seenUrls: async () => Array.from(state.seenUrls),
         },
       }];
       const run = await codeRuntime.run({ program, bindings });
@@ -514,214 +496,117 @@ return {
       return run.value;
     }
 
-    // ══ 屏蔽日志 ══
-    // 被拒条目先入 pendingRejected，周期结束时批量翻译标题后再写入 filterLog（译文直接存进日志）
-    function queueRejected(it, source, reason) {
-      state.pendingRejected.push({
-        title: String(it.title || ''),
-        url: String(it.url || ''),
-        sourceId: source ? String(source.id || '') : '',
-        reason,
-        ts: new Date().toISOString(),
-        cycle: state.cycleStamp || null,
-      });
-    }
-
     // ══ 管线阶段 ══
+    // 1. 粗搜：从最新 + 最热门拉取话题（linuxdo 源，模板按 maxItems 合并截断）
     async function stageCoarse(source) {
       const program = await loadTemplateAndScript(source);
-      // 粗搜上限：优先源级 maxItems，否则全局 maxCoarseItems，模板兜底 DEFAULT_MAX_ITEMS
-      const effective = Object.assign({}, source || {}, {
-        maxItems: (source && source.maxItems) || state.config.maxCoarseItems || DEFAULT_MAX_ITEMS,
+      // 目标 = 拉取数量（fetchCount）：源脚本从最新+最热门共收集这么多条「新」话题
+      const cap = Math.max(1, Number(state.config.fetchCount) || DEFAULT_FETCH_COUNT);
+      const effective = Object.assign({}, source, {
+        maxItems: cap,
+        blockTags: BLOCK_TAGS,
       });
       const items = await runSourceScript(program, { mode: 'titles', config: effective });
       return Array.isArray(items) ? items : [];
     }
 
-    async function stageJudge(source, items) {
-      const effectiveBlock = (state.config.blockWords || []).concat(state.preferences.block || []);
-      // 确定性过滤
-      const kept = [];
+    // 固定屏蔽：标签含「富可敌国」或标题含「富可敌国」即屏蔽；其余一概不在此过滤
+    function isBlockedTopic(it) {
+      const title = String((it && it.title) || '');
+      const tags = Array.isArray(it && it.tags) ? it.tags.map(String) : [];
+      return BLOCK_TAGS.some((t) => tags.indexOf(t) >= 0 || title.indexOf(t) >= 0);
+    }
+
+    // 2. 拉取时去重：按已读 URL（seenUrls）跳过重复；命中固定屏蔽标签跳过；
+    //    新话题总数不超过 fetchCount（拉取数量）。
+    async function pullFresh(items) {
+      const cap = Math.max(1, Number(state.config.fetchCount) || DEFAULT_FETCH_COUNT);
+      const out = [];
       for (const it of items) {
-        const urlKey = normalizeUrl(it.url);
-        if (state.exemptUrls.has(urlKey)) { kept.push(it); continue; }
-        // 已见过的条目（含启动时从 history.jsonl 装载的历史卡片）直接跳过：
-        // 不占精读上限、不进 LLM 判定、不记入屏蔽日志。arXiv/Solidot 等 RSS 按
-        // 旧→新排列且条目存续数天，每周期都会重复出现，若不提前跳过，
-        // maxCandidates 名额永远被旧文占满（新文反而被记为「候选上限截断」）。
-        if (state.seenUrls.has(urlKey)) continue;
-        const title = String(it.title || '').toLowerCase();
-        const hit = (effectiveBlock || []).find((w) => w && title.indexOf(String(w).toLowerCase()) >= 0);
-        if (hit) { queueRejected(it, source, 'block-keyword'); continue; }
-        kept.push(it);
+        if (out.length >= cap) break;
+        const key = normalizeUrl(it && it.url);
+        if (!key || state.seenUrls.has(key)) continue;  // 已读/已采集 → 不重复拉取
+        if (isBlockedTopic(it)) continue;              // 【富可敌国】标签 → 屏蔽
+        out.push(it);
       }
-      if (!kept.length) return [];
-      // 语义过滤：reasoning effort 较高时输出预算可能被思考过程占用导致 JSON 截断，
-      // 解析失败自动重试（最多 3 次），并加大输出预算。
-      const list = kept.map((it, i) => ({ i, title: it.title, url: it.url, snippet: String(it.snippet || '').slice(0, 200) }));
-      const recent = state.feedbackQueue.slice(-10).map((f) => '【不感兴趣】' + f.title);
+      return out;
+    }
+
+    // 确定性价值分（AI 失败/补齐时用）：回复数为主，浏览量、点赞为辅
+    function valueScore(it) {
+      const r = Number(it.replyCount) || 0;
+      const v = Number(it.views) || 0;
+      const l = Number(it.likes) || 0;
+      return r * 4 + v / 60 + l * 2;
+    }
+
+    // 3. AI 价值筛选：只判断话题价值（回复数/浏览量/内容质量等），不按主题/关键词；
+    //    输出数量贴近 outputCount；拉取数量 ≤ 输出数量时跳过 AI 过滤。
+    async function stageJudge(items) {
+      const cap = Math.max(1, Number(state.config.outputCount) || DEFAULT_OUTPUT_COUNT);
+      if (!items.length) return [];
+      if (items.length <= cap) return items;  // 拉取数量 ≤ 有效数量：不经 AI 过滤
+      const list = items.map((it, i) => ({
+        i,
+        title: String(it.title || ''),
+        url: String(it.url || ''),
+        snippet: String(it.snippet || '').slice(0, 200),
+        replyCount: Number(it.replyCount) || 0,
+        views: Number(it.views) || 0,
+        likes: Number(it.likes) || 0,
+        tags: Array.isArray(it.tags) ? it.tags.map(String) : [],
+      }));
       const system =
-        '你是信息筛选助手。用户配置了兴趣词，判断哪些条目值得精读并生成摘要卡片。' +
-        '\n兴趣: ' + JSON.stringify(state.config.interests || []) +
-        '\n规则: ' + JSON.stringify({ prefer: state.preferences.prefer || [], block: effectiveBlock, semanticNotes: state.preferences.semanticNotes || '' }) +
-        '\n最近不感兴趣样本: ' + JSON.stringify(recent) +
-        '\n判定标准：与任一兴趣词相关的条目都应入选。相关不仅指标题字面命中，还包括衍生主题' +
-        '（例如兴趣「AI」涵盖模型/工具/应用/公司动态/LLM 与 Agent/开发者生态；「计算机」涵盖编程、软件、硬件、网络、科技新闻；其他兴趣同理）。' +
-        '只有明显与所有兴趣都不相关的条目才拒绝；拿不准时倾向入选（宁可多选）。' +
-        '兴趣词按日常通俗含义理解（如「情感」指生活情感/人际关系/家庭/婚恋/情绪话题，不是情感计算等技术含义）。' +
-        '用户可在面板对多余条目标记「不感兴趣」，系统会据此学习收紧，无需你过度保守。' +
+        '你是话题价值筛选助手。以下是 Linux Do 论坛新拉取的话题列表，请按「价值」选出最有价值的 N 条。' +
+        '判断价值时综合考量：回复数与讨论热度（回复越多通常越有价值）、浏览量/点赞数（受关注程度）、' +
+        '话题内容是否有质量（是否具体、信息量足、对读者有实际帮助）、时效性与新鲜度，' +
+        '并避开垃圾/纯推广/无实质内容的话题——纯广告/福利推广类帖子即使回复数很高也不算价值。' +
+        '注意：不要根据话题的主题、标题关键词或标签过滤——任何主题的话题都可能是高价值的；只判断话题本身的价值。' +
+        '输出条数应尽量接近 N（列表长度足够时恰好输出 N 条），并按价值从高到低排序。' +
+        '\nN = ' + cap +
         '\n只输出 JSON: {"selected":[{"index":0,"reason":"一句话理由"}]}。';
       let parsed = null;
-      // 思考等级较高时输出预算可能被思考过程占用导致 JSON 截断；重试逐次加大预算
       const budgets = [4000, 6000, 8000];
       for (let attempt = 1; attempt <= 3; attempt++) {
-        const raw = await callModel(system, JSON.stringify(list, null, 1), budgets[attempt - 1]);
-        parsed = extractJson(raw);
-        if (parsed && Array.isArray(parsed.selected)) break;
-        console.warn('[dsh-livefeed] judge parse failed, retry', attempt + '/3');
+        try {
+          const raw = await callModel(system, JSON.stringify(list, null, 1), budgets[attempt - 1]);
+          parsed = extractJson(raw);
+          if (parsed && Array.isArray(parsed.selected)) break;
+        } catch (err) {
+          console.warn('[dsh-livefeed] judge call failed:', String((err && err.message) || err));
+        }
+        if (attempt < 3) console.warn('[dsh-livefeed] judge parse failed, retry', attempt + '/3');
       }
-      const selected = new Set();
+      const picked = [];
+      const used = new Set();
       if (parsed && Array.isArray(parsed.selected)) {
         for (const s of parsed.selected) {
           const idx = Number(s && s.index);
-          if (Number.isInteger(idx) && idx >= 0 && idx < kept.length) selected.add(idx);
-        }
-      } else {
-        throw new Error('筛选结果解析失败');
-      }
-      const out = [];
-      for (let i = 0; i < kept.length; i++) {
-        if (selected.has(i)) out.push(kept[i]);
-        else queueRejected(kept[i], source, 'model-filter');
-      }
-      // 精搜上限：优先源级 maxCandidates，否则全局 maxCandidatesPerSource。
-      // 被截断的选中项记入屏蔽日志（reason=max-candidates），保证统计数字与屏蔽列表可核对。
-      const cap = (source && source.maxCandidates) || state.config.maxCandidatesPerSource || DEFAULT_MAX_CANDIDATES;
-      for (let i = cap; i < out.length; i++) queueRejected(out[i], source, 'max-candidates');
-      return out.slice(0, cap);
-    }
-
-    // ══ 屏蔽日志标题翻译（周期末尾批量执行，译文直接写入 filterLog）══
-    async function stageTranslateRejected() {
-      const pending = state.pendingRejected;
-      state.pendingRejected = [];
-      if (!pending.length) return;
-      // 按 URL 去重（保留最新）；同一内容每周期重复被拒时只留一条
-      const seen = new Set();
-      const unique = [];
-      for (const e of pending) {
-        const key = normalizeUrl(e.url);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        unique.push(e);
-      }
-      const byUrl = new Map();
-      const need = [];
-      for (const e of unique) {
-        const key = normalizeUrl(e.url);
-        const cached = state.titleCache.get(key);
-        if (cached !== undefined) byUrl.set(key, cached);
-        else need.push({ url: e.url, title: e.title });
-      }
-      if (need.length) {
-        try {
-          const lang = state.config.summaryLanguage || 'zh-CN';
-          const system =
-            '将以下标题翻译成「' + lang + '」。专有名词/产品名/品牌名可保留原文；已是目标语言的标题原样返回。' +
-            '只输出 JSON 数组，顺序对应输入：[{"url":"…","title":"翻译后的标题"}]';
-          const raw = await callModel(system, JSON.stringify(need.map((m) => ({ url: m.url, title: m.title }))), 2500);
-          const parsed = extractJsonArr(raw);
-          if (Array.isArray(parsed)) {
-            for (const p of parsed) {
-              if (!p || !p.url) continue;
-              const t = String(p.title || '').trim();
-              if (t) state.titleCache.set(normalizeUrl(String(p.url)), t);
-            }
+          if (Number.isInteger(idx) && idx >= 0 && idx < items.length && !used.has(idx)) {
+            used.add(idx);
+            picked.push(items[idx]);
           }
-        } catch (err) {
-          console.error('[dsh-livefeed] title translate failed:', String((err && err.message) || err));
-        }
-        for (const e of need) {
-          const key = normalizeUrl(e.url);
-          if (!state.titleCache.has(key)) state.titleCache.set(key, e.title);
-          byUrl.set(key, state.titleCache.get(key));
+          if (picked.length >= cap) break;
         }
       }
-      // 缓存有界（简单淘汰）
-      if (state.titleCache.size > 500) {
-        const firstKey = state.titleCache.keys().next().value;
-        if (firstKey !== undefined) state.titleCache.delete(firstKey);
-      }
-      // 写入屏蔽日志：同 URL 旧条目替换为最新（标题=译文）
-      for (const e of unique) {
-        const key = normalizeUrl(e.url);
-        state.filterLog = state.filterLog.filter((x) => normalizeUrl(x.url) !== key);
-        state.filterLog.push({
-          title: byUrl.get(key) || e.title,
-          url: e.url,
-          sourceId: e.sourceId,
-          reason: e.reason,
-          ts: e.ts,
-          cycle: e.cycle || null,
-        });
-      }
-      if (state.filterLog.length > FILTER_LOG_CAP) state.filterLog.splice(0, state.filterLog.length - FILTER_LOG_CAP);
-    }
-
-    async function stageCluster(candidates) {
-      if (candidates.length <= 1) return candidates.map((c) => ({ members: [c] }));
-      const list = candidates.map((c, i) => ({ i, title: c.item.title, url: c.item.url, source: c.source.name }));
-      const system =
-        '将以下条目按“同一事件/话题”聚类（不同网站报道同一新闻算同一簇）。' +
-        '只输出 JSON: {"clusters":[{"members":[0,2]}]}。每个条目只能属于一个簇；无法归并的条目单独成簇 [i]。';
-      // 解析失败重试（最多 3 次，预算逐次加大）；仍失败则退回「各自成簇」（不会中断周期）
-      let parsed = null;
-      const budgets = [2500, 4000, 6000];
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        const raw = await callModel(system, JSON.stringify(list, null, 1), budgets[attempt - 1]);
-        parsed = extractJson(raw);
-        if (parsed && Array.isArray(parsed.clusters)) break;
-        console.warn('[dsh-livefeed] cluster parse failed, retry', attempt + '/3');
-      }
-      const clusters = [];
-      const used = new Set();
-      if (parsed && Array.isArray(parsed.clusters)) {
-        for (const cl of parsed.clusters) {
-          const members = (Array.isArray(cl && cl.members) ? cl.members : [])
-            .map((m) => Number(m))
-            .filter((m) => Number.isInteger(m) && m >= 0 && m < candidates.length && !used.has(m));
-          if (!members.length) continue;
-          for (const m of members) used.add(m);
-          clusters.push({ members: members.map((m) => candidates[m]) });
+      // AI 未选满（或调用失败）时按确定性价值分补齐，保证输出数量贴近预设
+      if (picked.length < cap) {
+        const rest = items
+          .map((it, i) => ({ it, i, s: valueScore(it) }))
+          .filter((x) => !used.has(x.i))
+          .sort((a, b) => b.s - a.s);
+        for (const x of rest) {
+          if (picked.length >= cap) break;
+          picked.push(x.it);
         }
       }
-      for (let i = 0; i < candidates.length; i++) {
-        if (!used.has(i)) clusters.push({ members: [candidates[i]] });
-      }
-      return clusters;
-    }
-
-    function pickMain(members) {
-      const weights = state.preferences.sourceWeights || {};
-      let best = members[0];
-      for (const m of members) {
-        const w1 = weights[m.source.id] || 1;
-        const w2 = weights[best.source.id] || 1;
-        if (w1 > w2) { best = m; continue; }
-        if (w1 === w2) {
-          const t1 = m.item.publishedAt ? Date.parse(m.item.publishedAt) : NaN;
-          const t2 = best.item.publishedAt ? Date.parse(best.item.publishedAt) : NaN;
-          if ((isNaN(t2) && !isNaN(t1)) || (!isNaN(t1) && !isNaN(t2) && t1 < t2)) best = m;
-        }
-      }
-      return best;
+      return picked;
     }
 
     // 安全验证页/反爬拦截页识别：这类页面文本非空但内容无效，
     // 命中后视为「正文为空」→ 卡片直接丢弃（不生成拦截提示类摘要）
     function isBlockPage(text) {
       const t = String(text || '').toLowerCase();
-      // 强特征：出现即判定（几乎不会出现在正常正文）
       const strong = [
         'attention required', 'checking your browser', 'verify you are human',
         'enable javascript and cookies', 'just a moment', 'access denied',
@@ -730,7 +615,6 @@ return {
         '异常活动', '安全系统阻止', '检测到异常', '安全验证',
       ];
       for (const m of strong) if (t.indexOf(m) >= 0) return true;
-      // 弱特征：短页面（拦截页通常很小）且命中多个才判定，避免误杀正常长文
       const weak = ['cloudflare', 'akamai', 'security check', 'bot', 'challenge', 'reference number', 'permission', 'blocked', '被阻止', '安全系统'];
       let w = 0;
       if (t.length < 12000) {
@@ -739,18 +623,17 @@ return {
       return w >= 2;
     }
 
-    const SUMMARIZE_INPUT_BUDGET = 30000; // 每个搜索源单次摘要调用的总输入预算（字符，≈15k tokens 内）
+    const SUMMARIZE_INPUT_BUDGET = 30000; // 单次摘要调用的总输入预算（字符，≈15k tokens 内）
 
-    // 单簇精搜：抓正文（网络请求，非模型调用）；无正文且无片段时返回 null（该簇丢弃）
-    async function fetchClusterContent(cluster) {
-      const main = pickMain(cluster.members);
+    // 4. 单话题精搜：抓正文（网络请求，非模型调用）；无正文且无片段时返回 null（该话题丢弃）
+    async function fetchItemContent(item, source) {
       let content = null;
       try {
-        const program = await loadTemplateAndScript(main.source);
-        const out = await runSourceScript(program, { mode: 'content', config: main.source, item: main.item });
+        const program = await loadTemplateAndScript(source);
+        const out = await runSourceScript(program, { mode: 'content', config: source, item });
         if (out && out.text) {
           if (isBlockPage(out.text)) {
-            console.log('[dsh-livefeed] block-page content skipped:', main.item.url);
+            console.log('[dsh-livefeed] block-page content skipped:', item.url);
             content = null;
           } else {
             content = out.text;
@@ -759,72 +642,53 @@ return {
       } catch (err) {
         console.error('[dsh-livefeed] fineSearch failed:', String(err && err.message || err));
       }
-      const snippets = cluster.members.map((m) => (m.item.snippet || '')).filter(Boolean).join('\n');
-      const fallbackText = content || snippets;
-      if (!fallbackText) return null;
-      return { cluster, main, content, fallbackText, sourceText: (content || snippets).slice(0, 6000) };
+      const snippet = String(item.snippet || '');
+      const fallbackText = content || snippet;
+      // 正文抓取失败也照常落卡（摘要用占位文案），保证输出数量贴近预设 outputCount
+      return { item, source, content, fallbackText, sourceText: (content || snippet).slice(0, 6000) };
     }
 
-    // 按源批量精读+摘要：抓取仍逐簇进行；每个搜索源的所有精读条目合并为一次模型调用，
-    // 条目多时自动压缩每条正文长度以适配单次输入预算；单源失败只影响该源。
-    async function stageFineAndSummarizeAll(clusters) {
+    // 5. 批量摘要：全部条目合并为一次模型调用；单条失败不影响其余
+    async function stageSummarize(entries) {
       const lang = state.config.summaryLanguage || 'zh-CN';
       const cards = [];
-      const entries = [];
-      for (const cl of clusters) {
-        const c = await fetchClusterContent(cl);
-        if (c) entries.push(c);
-      }
-      // 按搜索源分组（不同源不混批）
-      const bySource = new Map();
-      for (const e of entries) {
-        const sid = e.main.source.id || '?';
-        if (!bySource.has(sid)) bySource.set(sid, []);
-        bySource.get(sid).push(e);
-      }
-      let gi = 0;
-      for (const [sid, group] of bySource) {
-        gi += 1;
-        const sourceName = (group[0].main.source.name || sid);
-        state.progress = { stage: 'fine', detail: sourceName + '（' + (gi + 1) + '/' + bySource.size + '）', ts: Date.now() };
-        // 每条正文按预算均分（上限 6000/条），保证整组一次调用放得下
-        const perItem = Math.max(800, Math.min(6000, Math.floor(SUMMARIZE_INPUT_BUDGET / group.length)));
-        const results = new Array(group.length).fill(null);
-        try {
-          const system =
-            '你是资讯摘要助手。以下内容来自搜索源「' + sourceName + '」。对每条内容生成「' + lang + '」标题与 2-3 句摘要。' +
-            '标题必须翻译成「' + lang + '」（专有名词/产品名/品牌名可保留原文）。只输出 JSON 数组，顺序对应输入，' +
-            '每条都必须包含 index/title/summary：[{"index":0,"title":"…","summary":"…"}]';
-          const input = JSON.stringify(group.map((e, i) => ({ index: i, title: e.main.item.title, content: e.sourceText.slice(0, perItem) })));
-          const raw = await callModel(system, input, Math.min(12000, 2000 + group.length * 400));
-          const parsed = extractJsonArr(raw);
-          if (Array.isArray(parsed)) {
-            for (const p of parsed) {
-              if (!p || typeof p.index !== 'number' || !Number.isInteger(p.index) || p.index < 0 || p.index >= group.length) continue;
-              if (p.title && p.summary) results[p.index] = { title: String(p.title), summary: String(p.summary) };
-            }
+      if (!entries.length) return cards;
+      const sourceName = (entries[0].source && entries[0].source.name) || 'Linux Do';
+      state.progress = { stage: 'fine', detail: sourceName, ts: Date.now() };
+      const perItem = Math.max(800, Math.min(6000, Math.floor(SUMMARIZE_INPUT_BUDGET / entries.length)));
+      const results = new Array(entries.length).fill(null);
+      try {
+        const system =
+          '你是资讯摘要助手。以下内容来自「' + sourceName + '」。对每条内容生成「' + lang + '」标题与 2-3 句摘要。' +
+          '标题必须翻译成「' + lang + '」（专有名词/产品名/品牌名可保留原文）。只输出 JSON 数组，顺序对应输入，' +
+          '每条都必须包含 index/title/summary：[{"index":0,"title":"…","summary":"…"}]';
+        const input = JSON.stringify(entries.map((e, i) => ({ index: i, title: e.item.title, content: e.sourceText.slice(0, perItem) })));
+        const raw = await callModel(system, input, Math.min(12000, 2000 + entries.length * 400));
+        const parsed = extractJsonArr(raw);
+        if (Array.isArray(parsed)) {
+          for (const p of parsed) {
+            if (!p || typeof p.index !== 'number' || !Number.isInteger(p.index) || p.index < 0 || p.index >= entries.length) continue;
+            if (p.title && p.summary) results[p.index] = { title: String(p.title), summary: String(p.summary) };
           }
-        } catch (err) {
-          console.error('[dsh-livefeed] summarize failed for source ' + sid + ':', String((err && err.message) || err));
         }
-        for (let i = 0; i < group.length; i++) {
-          const e = group[i];
-          const r = results[i];
-          cards.push({
-            title: r ? r.title : e.main.item.title,
-            summary: r ? r.summary : e.fallbackText.slice(0, 300),
-            url: e.main.item.url,
-            sourceName: e.main.source.name,
-            publishedAt: e.main.item.publishedAt,
-            relatedUrls: e.cluster.members
-              .filter((m) => m.item.url !== e.main.item.url)
-              .map((m) => ({ url: m.item.url, sourceName: m.source.name })),
-          });
-        }
+      } catch (err) {
+        console.error('[dsh-livefeed] summarize failed:', String((err && err.message) || err));
+      }
+      for (let i = 0; i < entries.length; i++) {
+        const e = entries[i];
+        const r = results[i];
+        cards.push({
+          title: r ? r.title : e.item.title,
+          summary: r ? r.summary : (e.fallbackText ? e.fallbackText.slice(0, 300) : '（正文抓取失败，点击卡片查看原文）'),
+          url: e.item.url,
+          sourceName: e.source.name,
+          publishedAt: e.item.publishedAt,
+        });
       }
       return cards;
     }
 
+    // 6. 落卡：URL 去重（安全网）→ 未读卡片 → 归档
     async function stageLand(cards) {
       const newCards = [];
       for (const card of cards) {
@@ -839,9 +703,7 @@ return {
           url: card.url,
           sourceName: card.sourceName || '',
           publishedAt: card.publishedAt,
-          relatedUrls: card.relatedUrls || [],
           read: false,
-          feedback: null,
           isNew: true,
           createdAt: Date.now(),
           cycle: state.cycleStamp || null,
@@ -849,18 +711,21 @@ return {
         newCards.push(full);
         state.cards.push(full);
       }
-      // 有界：裁剪最老的「已读且非不感兴趣」卡片（仅入归档）
-      const bound = (state.config.maxCards || DEFAULT_MAX_CARDS) * 3;
-      if (state.cards.length > bound) {
-        const removable = state.cards.filter((c) => c.read && c.feedback !== 'dislike');
-        let over = state.cards.length - bound;
-        for (const r of removable) {
+      // 有界：优先裁剪最老的已读卡片；已读不足时裁剪最老卡片（含未读），
+      // 保证内存与 saveState 的 slice(-CARD_BOUND) 口径一致（不丢弃最新卡片）
+      if (state.cards.length > CARD_BOUND) {
+        const removable = state.cards.filter((c) => c.read);
+        let over = state.cards.length - CARD_BOUND;
+        for (const rc of removable) {
           if (over <= 0) break;
-          const idx = state.cards.indexOf(r);
+          const idx = state.cards.indexOf(rc);
           if (idx >= 0) { state.cards.splice(idx, 1); over--; }
         }
+        if (state.cards.length > CARD_BOUND) {
+          state.cards.splice(0, state.cards.length - CARD_BOUND);
+        }
       }
-      // 归档（有界滚动）
+      // 归档（有界滚动，历史去重依据）
       for (const c of newCards) {
         state.archive.push({ id: c.id, title: c.title, url: c.url, summary: c.summary, sourceName: c.sourceName, publishedAt: c.publishedAt, createdAt: c.createdAt });
       }
@@ -868,73 +733,19 @@ return {
       return newCards;
     }
 
-    async function stageRules() {
-      if (!state.feedbackQueue.length) return;
-      const recent = state.feedbackQueue;
-      state.feedbackQueue = [];
-      try {
-        const system =
-          '你是过滤规则维护助手。根据用户最近标记的「不感兴趣」内容更新规则文档。' +
-          '规则只允许增加负面规则（block / semanticNotes），禁止推断用户的正向偏好（防止信息茧房）。' +
-          '只输出 JSON: {"block":["关键词","…"],"semanticNotes":"一句话"}。block 是合并去重后的完整列表（含原有条目），semanticNotes 是更新后的完整文本。';
-        const user =
-          '当前规则: ' + JSON.stringify({ block: state.preferences.block, semanticNotes: state.preferences.semanticNotes }) +
-          '\n新增不感兴趣: ' + JSON.stringify(recent.map((r) => r.title));
-        const parsed = extractJson(await callModel(system, user, 1500));
-        if (parsed && Array.isArray(parsed.block)) {
-          state.preferences.block = parsed.block.filter((b) => b && String(b).trim()).map((b) => String(b).trim());
-          state.preferences.semanticNotes = String(parsed.semanticNotes || state.preferences.semanticNotes || '');
-          state.preferences.version = (state.preferences.version || 1) + 1;
-          state.preferences.updatedAt = new Date().toISOString();
-          await savePreferences();
-        }
-      } catch (err) {
-        console.error('[dsh-livefeed] rules update failed:', String(err && err.message || err));
-      }
-    }
-
-    // ══ 规则重训（抽样归档）══
-    async function runRerunRules() {
-      if (state.running) return;
-      state.running = true;
-      try {
-        const sample = state.archive.filter((x) => x.feedback === 'dislike').slice(-30).map((d) => d.title);
-        const system =
-          '你是过滤规则维护助手。基于用户历史「不感兴趣」样本重写规则。只允许负面规则（block / semanticNotes），禁止推断正向偏好。' +
-          '只输出 JSON: {"block":["关键词","…"],"semanticNotes":"一句话"}。';
-        const parsed = extractJson(await callModel(system, '不感兴趣样本: ' + JSON.stringify(sample), 1500));
-        if (parsed && Array.isArray(parsed.block)) {
-          state.preferences.block = parsed.block.map((b) => String(b).trim()).filter(Boolean);
-          state.preferences.semanticNotes = String(parsed.semanticNotes || '');
-          state.preferences.version = (state.preferences.version || 1) + 1;
-          state.preferences.updatedAt = new Date().toISOString();
-          await savePreferences();
-        }
-      } catch (err) {
-        console.error('[dsh-livefeed] rerun rules failed:', String(err && err.message || err));
-      } finally {
-        state.running = false;
-      }
-    }
-
     // ══ 持久化 ══
     async function saveState() {
-      const panelCards = state.cards.filter((c) => !c.read || c.feedback === 'dislike');
+      // 持久化全部卡片（未读 + 有界已读，内存已按 CARD_BOUND 裁剪），已读 tab 跨周期/重启保留
       await fsWrite(STATE_FILE, JSON.stringify({
-        cards: panelCards,
-        exemptUrls: Array.from(state.exemptUrls),
-        feedbackQueue: state.feedbackQueue.slice(-FEEDBACK_WINDOW),
+        cards: state.cards.slice(-CARD_BOUND),
         lastRunAt: state.lastRunAt,
       }, null, 2));
     }
     async function saveConfig() {
       await fsWrite(CONFIG_FILE, JSON.stringify(state.config, null, 2));
     }
-    async function savePreferences() {
-      await fsWrite(PREFERENCES_FILE, JSON.stringify(state.preferences, null, 2));
-    }
     async function saveArchive() {
-      const max = state.config.archiveMaxEntries || DEFAULT_ARCHIVE_MAX;
+      const max = 5000;
       if (state.archive.length > max) state.archive = state.archive.slice(-max);
       await fsWrite(HISTORY_FILE, state.archive.map((x) => JSON.stringify(x)).join('\n'));
     }
@@ -942,18 +753,11 @@ return {
     async function loadAll() {
       const cfgText = await fsRead(CONFIG_FILE);
       state.config = mergeConfig(defaultConfig(), parseJson(cfgText, null));
-      state.preferences = parseJson(await fsRead(PREFERENCES_FILE), defaultPreferences());
-      if (!Array.isArray(state.preferences.block)) state.preferences.block = [];
-      if (!Array.isArray(state.preferences.prefer)) state.preferences.prefer = [];
-      if (!state.preferences.sourceWeights || typeof state.preferences.sourceWeights !== 'object') state.preferences.sourceWeights = {};
       const st = parseJson(await fsRead(STATE_FILE), null);
       state.cards = (st && Array.isArray(st.cards) ? st.cards : [])
-        .filter((c) => c && c.url && (!c.read || c.feedback === 'dislike'))
-        .map((c) => Object.assign({ relatedUrls: [], isNew: false, createdAt: Date.now() }, c, { isNew: false }));
-      state.exemptUrls = new Set(st && Array.isArray(st.exemptUrls) ? st.exemptUrls : []);
-      state.feedbackQueue = st && Array.isArray(st.feedbackQueue) ? st.feedbackQueue.slice(-FEEDBACK_WINDOW) : [];
-      // 恢复上次成功采集时间（跨重启调度依据）：无效值忽略；未来时间（时钟回拨/跨机迁移）钳制到当前，
-      // 避免「距上次采集为负」导致调度器永久跳过。
+        .filter((c) => c && c.url)
+        .slice(-CARD_BOUND)
+        .map((c) => Object.assign({ isNew: false, createdAt: Date.now() }, c, { isNew: false }));
       if (st && typeof st.lastRunAt === 'number' && Number.isFinite(st.lastRunAt)) {
         state.lastRunAt = Math.min(st.lastRunAt, Date.now());
       }
@@ -980,49 +784,61 @@ return {
       state.running = true;
       state.sourceErrors = [];
       state.cycleStats = null;
-      state.retrying = 0;
-      state.pendingRejected = [];
-      state.cycleStamp = Date.now(); // 本轮刷新事件标识（分组/折叠依据）
+      state.cycleStamp = Date.now();
       try {
         await loadAll();
         const stats = { scanned: 0, selected: 0, filtered: 0 };
-        const candidates = [];
-        for (const source of state.config.sources || []) {
-          if (!source || !source.enabled) continue;
+        const source = linuxdoSource(state.config);
+        let failed = false;
+        if (!source || source.enabled === false) {
+          // 源被禁用：保留错误提示；延后 lastRunAt 避免调度器 30s 空转，等待用户修正配置
+          state.lastError = 'Linux Do 源已禁用（config.json）';
+          state.cycleStats = stats;
+        } else {
           try {
             state.progress = { stage: 'coarse', detail: String(source.name || source.id || ''), ts: Date.now() };
-            const items = await stageCoarse(source);
-            stats.scanned += items.length;
+            const items = await stageCoarse(source);      // 最新 + 最热门原始列表
+            stats.scanned = items.length;
             state.progress = { stage: 'judge', detail: String(source.name || source.id || ''), ts: Date.now() };
-            const picked = await stageJudge(source, items);
-            stats.filtered += items.length - picked.length;
-            stats.selected += picked.length;
-            for (const it of picked) candidates.push({ item: it, source });
+            const fresh = await pullFresh(items);         // 按已读 URL 去重 + 固定屏蔽标签 + fetchCount 上限
+            const picked = await stageJudge(fresh);       // AI 价值筛选（数量不足时跳过）
+            let landed = 0;
+            if (picked.length) {
+              const entries = [];
+              for (const it of picked) {
+                state.progress = { stage: 'fine', detail: String(source.name || source.id || ''), ts: Date.now() };
+                const e = await fetchItemContent(it, source);
+                if (e) entries.push(e);
+              }
+              if (entries.length) {
+                const cards = await stageSummarize(entries);
+                state.progress = { stage: 'land', detail: '', ts: Date.now() };
+                landed = (await stageLand(cards)).length;   // 实际落卡数（显示与未读一致）
+              }
+            }
+            stats.selected = landed || picked.length;      // 输出数量：以实际落卡为准
+            stats.filtered = stats.scanned - stats.selected;
           } catch (err) {
+            // 源级失败（CF 质询/浏览器启动失败/模型调用失败等）：保留错误并退避重试
+            failed = true;
             state.sourceErrors.push({ sourceId: String(source.id || ''), message: String((err && err.message) || err) });
+            state.lastError = String((err && err.message) || err);
             console.error('[dsh-livefeed] source failed:', source.id, err);
           }
+          state.cycleStats = stats;
+          if (!failed) { state.lastError = undefined; state.retrying = 0; }
+          state.tick += 1;
         }
-        if (candidates.length) {
-          state.progress = { stage: 'cluster', detail: '', ts: Date.now() };
-          const clusters = await stageCluster(candidates);
-          const cards = await stageFineAndSummarizeAll(clusters);
-          state.progress = { stage: 'land', detail: '', ts: Date.now() };
-          await stageLand(cards);
-        }
-        // 被拒条目批量翻译标题后写入屏蔽日志（译文即数据）
-        state.progress = { stage: 'translate', detail: String(state.pendingRejected.length), ts: Date.now() };
-        await stageTranslateRejected();
-        state.progress = { stage: 'rules', detail: '', ts: Date.now() };
-        await stageRules();
-        state.cycleStats = stats;
-        state.lastError = undefined;
+        // 无论成功/失败/禁用都先更新 lastRunAt 再落盘（重启防抖据此判断），
+        // 失败路径由 scheduleRetry 退避重试（retrying 只在成功时清零），禁用路径等待用户修正配置
         state.lastRunAt = Date.now();
-        state.tick += 1;
-        await saveState(); // 顺序在 lastRunAt 之后：连同上次采集时间一并持久化（重启调度依据）
+        await saveState();
+        if (failed) scheduleRetry();
       } catch (err) {
         state.lastError = String((err && err.message) || err);
         console.error('[dsh-livefeed] cycle failed:', err);
+        state.lastRunAt = Date.now(); // 防御性：外层失败同样延后下次尝试
+        await saveState();
         scheduleRetry();
       } finally {
         state.running = false;
@@ -1055,12 +871,10 @@ return {
     // ══ RPC 处理器表（HTTP 路由与动态 harness 共用）══
     const handlers = {
       'cards': async () => jsonSafe({
-        cards: state.cards.slice(-300).map((c) => ({
+        cards: state.cards.slice(-CARD_BOUND).map((c) => ({
           id: c.id, title: c.title, summary: c.summary, url: c.url,
           sourceName: c.sourceName, publishedAt: c.publishedAt,
-          relatedUrls: c.relatedUrls || [],
-          isNew: !!c.isNew, read: !!c.read, feedback: c.feedback || null,
-          createdAt: c.createdAt,
+          isNew: !!c.isNew, read: !!c.read, createdAt: c.createdAt,
           cycle: c.cycle === undefined || c.cycle === null ? null : c.cycle,
         })),
         status: {
@@ -1078,43 +892,25 @@ return {
       'config': async () => jsonSafe({
         config: state.config ? {
           intervalMinutes: state.config.intervalMinutes,
-          maxCards: state.config.maxCards,
-          maxCandidatesPerSource: state.config.maxCandidatesPerSource,
-          maxCoarseItems: state.config.maxCoarseItems,
+          fetchCount: state.config.fetchCount,
+          outputCount: state.config.outputCount,
           summaryLanguage: state.config.summaryLanguage,
-          interests: state.config.interests || [],
-          blockWords: state.config.blockWords || [],
-          archiveMaxEntries: state.config.archiveMaxEntries,
           model: state.config.model || null,
-          sources: state.config.sources || [],
         } : null,
       }),
       'refresh': async () => {
-        if (state.running) return { accepted: false };
+        if (state.paused) return { accepted: false, reason: 'paused' };
+        if (state.running) return { accepted: false, reason: 'running' };
         runCycle();
         return { accepted: true };
       },
       'mark': async (args) => {
         const a = args || {};
         const card = state.cards.find((c) => c.id === a.cardId);
-        if (card) {
-          if (a.read === true) { card.read = true; card.isNew = false; }
-          if (a.feedback === 'dislike') {
-            if (card.feedback !== 'dislike') {
-              state.feedbackQueue.push({ title: card.title, url: card.url, ts: Date.now() });
-              if (state.feedbackQueue.length > FEEDBACK_WINDOW) state.feedbackQueue.shift();
-            }
-            card.feedback = 'dislike';
-            card.read = true;
-            card.isNew = false;
-          } else if (a.feedback === null) {
-            card.feedback = null;
-          }
-          const key = normalizeUrl(card.url);
-          const ae = state.archive.find((x) => normalizeUrl(x.url) === key);
-          if (ae) ae.feedback = card.feedback;
+        if (card && a.read === true) {
+          card.read = true;
+          card.isNew = false;
           await saveState();
-          await saveArchive();
         }
         return { ok: true };
       },
@@ -1134,101 +930,10 @@ return {
         const a = args || {};
         const cfg = state.config || defaultConfig();
         if (typeof a.intervalMinutes === 'number' && a.intervalMinutes >= 1 && a.intervalMinutes <= 1440) cfg.intervalMinutes = Math.round(a.intervalMinutes);
-        if (a.model !== undefined) {
-          cfg.model = (a.model === null) ? null : {
-            provider: String((a.model && a.model.provider) || ''),
-            model: String((a.model && a.model.model) || ''),
-            reasoningEffort: (a.model && a.model.reasoningEffort) || undefined,
-          };
-        }
-        if (Array.isArray(a.interests)) cfg.interests = a.interests.map(String);
-        if (Array.isArray(a.blockWords)) cfg.blockWords = a.blockWords.map(String);
-        if (typeof a.archiveMaxEntries === 'number' && a.archiveMaxEntries >= 100) cfg.archiveMaxEntries = Math.round(a.archiveMaxEntries);
-        if (typeof a.maxCoarseItems === 'number' && a.maxCoarseItems >= 1 && a.maxCoarseItems <= 100) cfg.maxCoarseItems = Math.round(a.maxCoarseItems);
-        if (typeof a.maxCandidatesPerSource === 'number' && a.maxCandidatesPerSource >= 1 && a.maxCandidatesPerSource <= 20) cfg.maxCandidatesPerSource = Math.round(a.maxCandidatesPerSource);
-        if (Array.isArray(a.sources)) {
-          for (const s of a.sources) {
-            const target = cfg.sources.find((x) => x.id === s.id);
-            if (target) {
-              if (typeof s.enabled === 'boolean') target.enabled = s.enabled;
-              if (typeof s.query === 'string') target.query = s.query;
-              // 源级阈值：数字覆盖全局；null 清除覆盖回退全局默认
-              if (typeof s.maxItems === 'number') target.maxItems = Math.max(1, Math.min(100, Math.round(s.maxItems)));
-              else if (s.maxItems === null) delete target.maxItems;
-              if (typeof s.maxCandidates === 'number') target.maxCandidates = Math.max(1, Math.min(20, Math.round(s.maxCandidates)));
-              else if (s.maxCandidates === null) delete target.maxCandidates;
-            }
-          }
-        }
+        if (typeof a.fetchCount === 'number' && a.fetchCount >= 1 && a.fetchCount <= 200) cfg.fetchCount = Math.round(a.fetchCount);
+        if (typeof a.outputCount === 'number' && a.outputCount >= 1 && a.outputCount <= 50) cfg.outputCount = Math.round(a.outputCount);
         state.config = cfg;
         await saveConfig();
-        return { ok: true };
-      },
-      'update-words': async (args) => {
-        const a = args || {};
-        if (Array.isArray(a.interests)) state.config.interests = a.interests.map(String);
-        if (Array.isArray(a.blockWords)) state.config.blockWords = a.blockWords.map(String);
-        await saveConfig();
-        return { ok: true };
-      },
-      'model-catalog': async () => {
-        const providers = [];
-        try {
-          for (const p of ctx.llm.listProviders()) {
-            let models = [];
-            try { models = await ctx.llm.listModels(p.id); } catch (_) { models = []; }
-            const modelEntries = [];
-            for (const m of models) {
-              const entry = { id: m.id, name: m.name, efforts: null };
-              try {
-                // 每个模型的思考等级来自其能力元数据（resolveModelInfo），不是全局固定列表
-                const info = await ctx.llm.resolveModelInfo(p.id, m.id);
-                if (info && info.reasoning && Array.isArray(info.reasoning.efforts) && info.reasoning.efforts.length) {
-                  entry.efforts = info.reasoning.efforts.map((x) => ({ id: x.id, name: x.name }));
-                }
-              } catch (_) { /* 能力解析失败则无 efforts，客户端回退固定列表 */ }
-              modelEntries.push(entry);
-            }
-            providers.push({ id: p.id, name: p.name, models: modelEntries });
-          }
-        } catch (_) { /* 目录失败返回空 */ }
-        return { providers };
-      },
-      'rules': async () => jsonSafe({ rules: state.preferences }),
-      'rerun-rules': async () => {
-        if (state.running) return { accepted: false };
-        runRerunRules();
-        return { accepted: true };
-      },
-      'filter-log': async () => ({
-        items: state.filterLog.slice(-FILTER_LOG_CAP).reverse(),
-      }),
-      'debug-log': async () => ({ items: requestLog.slice(-200).reverse() }),
-      'unblock': async (args) => {
-        const url = String((args && args.url) || '');
-        if (!url) return { ok: false };
-        const key = normalizeUrl(url);
-        const log = state.filterLog.find((l) => normalizeUrl(l.url) === key);
-        state.exemptUrls.add(key);
-        state.seenUrls.add(key);
-        // 撤销后从「被屏蔽内容」列表移除该条，避免「已撤销仍显示」的混淆
-        state.filterLog = state.filterLog.filter((l) => normalizeUrl(l.url) !== key);
-        const existing = state.cards.find((c) => normalizeUrl(c.url) === key);
-        if (!existing) {
-          state.cards.push({
-            id: 'u' + Date.now().toString(36),
-            title: log ? log.title : url,
-            summary: '（已撤销屏蔽，暂以标题展示；下一周期将正常采集正文）',
-            url,
-            sourceName: log ? log.sourceId : '',
-            read: false,
-            feedback: null,
-            isNew: true,
-            createdAt: Date.now(),
-            cycle: state.cycleStamp || Date.now(),
-          });
-        }
-        await saveState();
         return { ok: true };
       },
     };
@@ -1266,7 +971,6 @@ return {
       console.log('[dsh-livefeed] config dir:', CONFIG_DIR);
       loadAll();
 
-      // HTTP API（bundle 模式客户端使用）
       const stopRoute = ctx.webServer.register({
         kind: 'exact',
         path: ROUTE_PATH,
@@ -1282,7 +986,6 @@ return {
           if (req.method === 'POST') {
             try { payload = JSON.parse(await readBody(req)) || {}; } catch (_) { payload = {}; }
           } else if (req.method === 'GET' || req.method === 'HEAD') {
-            // GET 诊断：/api/dsh-livefeed?method=model-catalog —— 浏览器地址栏可直接打开验证
             try {
               const u = new URL(req.url || '/', 'http://local');
               payload = { method: String(u.searchParams.get('method') || ''), args: {} };
@@ -1311,9 +1014,6 @@ return {
       }
 
       const stopInterval = ctx.interval(tick, TICK_MS);
-      // 启动检查：距上次成功采集（持久化于 state.json 的 lastRunAt）不足间隔时跳过首轮采集，
-      // 由后续 tick 在间隔到期后自动执行 —— 重启 dsh 不再每次都重复采集；
-      // 距上次采集已超间隔（或从未采集过）时仍立即执行一轮。
       const stopBoot = ctx.timeout(() => {
         if (disposed || state.paused) return;
         if (state.lastRunAt !== undefined && Date.now() - state.lastRunAt < intervalMs()) {
@@ -1328,7 +1028,7 @@ return {
         if (stopHarness) stopHarness();
         if (stopInterval) stopInterval();
         if (stopBoot) stopBoot();
-        closeBrowserSession(); // 关闭可能仍在运行的离屏 Edge（异步即发即忘）
+        closeBrowserSession();
       };
     });
   },

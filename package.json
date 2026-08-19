@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-livefeed",
-  "description": "DSH 实时讯息面板：定时从可配置的搜索源脚本采集内容，模型筛选/聚类/摘要，右缘悬浮面板四层分组展示，左滑反馈与 AI 过滤规则学习",
+  "description": "DSH 实时讯息面板（Linux Do 版）：定时从 linux.do 最新+最热门拉取话题，AI 按价值筛选输出，右缘悬浮面板未读/已读展示，按已读 URL 去重",
   "version": "0.1.0",
   "private": true,
   "type": "module",

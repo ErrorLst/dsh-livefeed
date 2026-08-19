@@ -4,7 +4,7 @@
  * Host 将本模板与源脚本拼接（program = 模板 + "\n" + 源脚本）后，作为
  * codeRuntime 的 program 运行。源脚本只需实现：
  *
- *   async function coarseSearch(api)   // 必选：粗搜，返回 [{title, url, snippet?, publishedAt?}]
+ *   async function coarseSearch(api)   // 必选：粗搜，返回 [{title, url, snippet?, publishedAt?, replyCount?, views?, likes?, tags?}]
  *   async function fineSearch(api, item) // 可选：精搜，返回 { text }（默认实现见下）
  *
  * 模板在文件尾部注入调度器，依据 api.mode() 分派；归一化/截断/去重由模板统一完成。
@@ -125,6 +125,12 @@ function _normalizeTitles(items, cfg) {
       url,
       snippet: it.snippet ? String(it.snippet).slice(0, 500) : '',
       publishedAt: typeof it.publishedAt === 'string' ? it.publishedAt : undefined,
+      // 附加字段（源脚本可携带，供 Host 的 AI 价值筛选使用；缺失时安全回退）
+      replyCount: Number(it.replyCount) || 0,
+      postsCount: Number(it.postsCount) || 0,
+      views: Number(it.views) || 0,
+      likes: Number(it.likes) || 0,
+      tags: Array.isArray(it.tags) ? it.tags.map(String) : [],
     });
     if (out.length >= max) break;
   }

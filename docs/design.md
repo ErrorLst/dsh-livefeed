@@ -1,7 +1,16 @@
 # LiveFeed 设计文档
 
-> 状态：v1 实现完成（Host/Client 代码就绪，动态插件部署验证中）
+> 状态：v2（Linux Do 专用精简版）实现完成
 > 关联文档：[搜索源基类模板契约](source-contract.md) · [HTML 原型](../prototype/prototype.html)
+
+> ## v2 变更（Linux Do 专用精简版）
+>
+> - **源固定为 Linux Do**：仅从 `latest.json`（最新）+ `hot.json`（最热门）拉取话题，删除多源/聚类/规则学习/屏蔽日志等机制；
+> - **固定屏蔽**：标题或标签命中「富可敌国」的话题确定性过滤（`BLOCK_TAGS`），不经 AI；
+> - **AI 价值筛选**：其余话题由 AI 按价值（回复数/浏览量/内容质量/讨论热度等）选出前 `outputCount` 条，**不按主题/关键词过滤**；拉取数量 ≤ 输出数量时跳过 AI 过滤；AI 失败/未选满时按确定性价值分（回复数×4 + 浏览量/60 + 点赞×2）补齐；
+> - **两个参数**：`fetchCount`（拉取数量，1–200）、`outputCount`（输出数量，1–50）；面板只有「未读 / 已读」两个组件；
+> - **按已读 URL 去重**：`pullFresh()` 在拉取时按 `seenUrls` 跳过已采集 URL，不重复拉取；
+> - 以下 v1 章节中与多源、兴趣词、规则学习、屏蔽日志、不感兴趣反馈相关的描述已不再适用，仅作历史参考。
 
 ## 1. 背景与目标
 
@@ -73,16 +82,13 @@
 
 ```jsonc
 {
-  "intervalMinutes": 10,          // 刷新周期（分钟）
-  "maxCards": 8,                  // 面板卡片上限
-  "maxCandidatesPerSource": 5,    // 每源进入精搜的候选上限
+  "intervalMinutes": 30,          // 刷新周期（分钟，面板不展示，可手动编辑）
+  "fetchCount": 40,               // 拉取数量：单次从「最新 + 最热门」共拉取的话题数（1–200）
+  "outputCount": 8,               // 输出数量：AI 价值筛选后输出的卡片数（1–50）
   "summaryLanguage": "zh-CN",     // 摘要语言
-  "interests": ["AI Agent", "DeepSeek", "编程工具"],  // 模型筛选依据（面板可编辑）
-  "blockWords": [],               // 用户屏蔽词（面板可编辑；与 AI 学习的 preferences.block 合并生效，互不覆盖）
-  "archiveMaxEntries": 5000,      // history.jsonl 归档上限（超限滚动截断）
   "model": null,                  // null=跟随当前默认模型；或 {provider, model, reasoningEffort?}
   "sources": [
-    { "id": "linuxdo", "name": "Linux.do", "script": "sources/linuxdo.js", "query": "AI", "enabled": true }
+    { "id": "linuxdo", "name": "Linux Do", "script": "sources/linuxdo.js", "query": "", "enabled": true, "fetch": "browser", "maxItems": 200 }
   ]
 }
 ```

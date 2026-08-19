@@ -1,6 +1,9 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * dsh-livefeed Client 半（v1.2：bundle 化）
+ * dsh-livefeed Client 半（v2：Linux Do 专用精简版）
  * ═══════════════════════════════════════════════════════════════════════════
+ * - 面板只有「未读 / 已读」两个组件；
+ * - 设置视图只有两个参数：拉取数量（fetchCount）、输出数量（outputCount）；
+ * - 点击卡片打开原文并自动标记已读。
  * 约定：
  * - 真实 client 插件环境（bundle）：浏览器全局可用（fetch/document）；
  *   lib/client.js 由此文件生成（window.__ModuleLoader__.load 包装，React 经 require 注入）；
@@ -94,15 +97,13 @@ return {
 .lf-group .lf-group-count { font-size: 10px; }
 .lf-group .lf-group-chevron { flex: none; font-size: 10px; }
 .lf-group.lf-collapsed { opacity: .72; }
-/* 折叠组内容区：缩进 + 引导竖线，树状层级（卡片在折叠按钮“内部”，不与其平级） */
 .lf-cycle-body {
   margin: 0 6px 4px 16px;
   padding-left: 10px;
   border-left: 1px solid var(--dsw-alias-border-l1);
   display: flex; flex-direction: column; gap: 2px;
 }
-.lf-cycle-body .lf-card-wrap, .lf-cycle-body .lf-filter-item { border-radius: 6px; }
-.lf-cycle-body .lf-filter-item { padding-left: 8px; padding-right: 4px; }
+.lf-cycle-body .lf-card-wrap { border-radius: 6px; }
 .lf-src-err {
   flex: none; padding: 4px 10px; font-size: 11px;
   color: var(--dsw-alias-state-error-primary);
@@ -112,31 +113,18 @@ return {
 }
 .lf-src-err-item { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lf-card-wrap { position: relative; overflow: hidden; border-radius: 8px; }
-.lf-card-swipe {
-  position: absolute; top: 0; right: 0; bottom: 0; width: 84px;
-  background: var(--dsw-alias-state-error-primary); color: #fff;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-  font-size: 10px; font-weight: 600;
-}
-.lf-card-swipe.lf-remove { background: var(--dsw-alias-label-tertiary); color: var(--dsw-alias-label-primary-foreground); }
-.lf-card-swipe svg { width: 14px; height: 14px; }
 .lf-card {
   display: block; text-decoration: none; color: inherit;
   padding: 10px 12px; border-radius: 8px;
   border: 1px solid transparent;
   position: relative; z-index: 1;
   background: var(--dsw-alias-bg-layer-1);
-  transition: background .12s, transform .18s ease;
-  touch-action: pan-y; user-select: none; cursor: pointer;
+  transition: background .12s;
+  cursor: pointer;
 }
 .lf-card:hover { background: var(--dsw-alias-interactive-bg-hover-solid); }
-.lf-card.lf-dragging { transition: none; cursor: grabbing; }
-.lf-card.lf-swiped { transform: translateX(-120%); opacity: 0; }
 .lf-card.lf-read .lf-card-title { color: var(--dsw-alias-label-secondary); }
 .lf-card.lf-read .lf-card-summary { opacity: .75; }
-/* 紧凑模式（不感兴趣/屏蔽标签页）：仅标题，容纳更多条目 */
-.lf-card.lf-compact { padding: 8px 12px; }
-.lf-card.lf-compact .lf-card-title { -webkit-line-clamp: 1; font-size: 12.5px; }
 .lf-card-title-row { display: flex; align-items: flex-start; gap: 6px; }
 .lf-card-title {
   flex: 1; font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary);
@@ -159,9 +147,6 @@ return {
   font-size: 10px; padding: 1px 6px; border-radius: 4px;
   background: var(--dsw-specific-bubble); color: var(--dsw-alias-state-business-primary);
 }
-.lf-related { font-size: 10px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
-.lf-feedback-tag { font-size: 10px; padding: 1px 6px; border-radius: 4px; font-weight: 600; }
-.lf-feedback-tag.lf-dislike { background: var(--dsw-alias-interactive-bg-hover-danger); color: var(--dsw-alias-state-error-primary); }
 .lf-skeleton { padding: 10px 12px; }
 .lf-skeleton .sk { background: var(--dsw-alias-bg-skeleton); border-radius: 6px; margin-bottom: 8px; height: 12px; }
 .lf-skeleton .sk.w70 { width: 70%; }
@@ -190,90 +175,13 @@ return {
 .lf-sec-title { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary); margin-bottom: 10px; }
 .lf-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
 .lf-field > span { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
-.lf-field select, .lf-field input[type="number"] {
+.lf-field input[type="number"] {
   width: 100%; height: 30px; padding: 0 8px; border-radius: 7px;
   border: 1px solid var(--dsw-alias-border-l2);
   background: var(--dsw-specific-input-major); color: var(--dsw-alias-label-primary);
   font-size: 12px; font-family: inherit; outline: none;
 }
-.lf-field select:focus, .lf-field input:focus { border-color: var(--dsw-alias-state-business-primary); }
-.lf-field select:disabled, .lf-field input:disabled { opacity: .5; }
-.lf-check { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--dsw-alias-label-secondary); cursor: pointer; user-select: none; }
-.lf-check input { accent-color: var(--dsw-alias-state-business-primary); }
-.lf-check .hint { color: var(--dsw-alias-label-tertiary); font-size: 11px; }
-.lf-source-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--dsw-alias-border-l1); }
-.lf-source-row:last-of-type { border-bottom: none; }
-.lf-source-info { flex: 1; min-width: 0; }
-.lf-source-name { font-size: 12px; font-weight: 500; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lf-source-id { font-size: 11px; color: var(--dsw-alias-label-tertiary); margin-top: 1px; }
-.lf-source-row.lf-disabled .lf-source-name, .lf-source-row.lf-disabled .lf-source-id { opacity: .55; }
-.lf-switch { position: relative; flex: none; width: 32px; height: 18px; cursor: pointer; display: inline-block; }
-.lf-switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
-.lf-switch .lf-switch-track {
-  position: absolute; inset: 0; border-radius: 999px;
-  background: var(--dsw-alias-border-l3); transition: background .15s;
-}
-.lf-switch .lf-switch-track::after {
-  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
-  border-radius: 50%; background: #fff; transition: transform .15s;
-}
-.lf-switch input:checked + .lf-switch-track { background: var(--dsw-alias-state-business-primary); }
-.lf-switch input:checked + .lf-switch-track::after { transform: translateX(14px); }
-.lf-thresh-global { display: flex; gap: 12px; margin: 0 0 4px; }
-.lf-thresh { display: flex; gap: 6px; flex: none; align-items: flex-end; }
-.lf-thresh-item { display: flex; flex-direction: column; gap: 2px; }
-.lf-thresh-item > span { font-size: 10px; color: var(--dsw-alias-label-tertiary); }
-.lf-thresh-item input[type="number"] {
-  width: 56px; height: 26px; padding: 0 6px; border-radius: 7px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-specific-input-major); color: var(--dsw-alias-label-primary);
-  font-size: 11px; font-family: inherit; outline: none;
-}
-.lf-thresh-item input:focus { border-color: var(--dsw-alias-state-business-primary); }
-.lf-sec-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.lf-sec-title-row .lf-sec-title { margin-bottom: 0; }
-.lf-gearbtn { flex: none; border: none; background: none; cursor: pointer; font-size: 13px; line-height: 1; color: var(--dsw-alias-label-tertiary); padding: 3px 5px; border-radius: 6px; }
-.lf-gearbtn:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
-.lf-thresh-body { flex: 1; overflow-y: auto; padding: 4px 14px 10px; scrollbar-gutter: stable; }
-.lf-thresh-src { display: flex; align-items: flex-end; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--dsw-alias-border-l1); }
-.lf-thresh-src:last-of-type { border-bottom: none; }
-.lf-thresh-src-name { flex: 1; min-width: 0; font-size: 12px; font-weight: 500; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lf-thresh-note { font-size: 10px; color: var(--dsw-alias-label-tertiary); margin: 0 0 6px; }
-.lf-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-.lf-chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 2px 8px; border-radius: 999px; font-size: 11px;
-  background: var(--dsw-specific-bubble); color: var(--dsw-alias-state-business-primary);
-}
-.lf-chip button { border: none; background: none; color: inherit; cursor: pointer; padding: 0; font-size: 12px; line-height: 1; opacity: .7; }
-.lf-chip button:hover { opacity: 1; }
-.lf-chip-add { display: flex; gap: 6px; }
-.lf-chip-add input {
-  flex: 1; min-width: 0; height: 26px; padding: 0 8px; border-radius: 7px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-specific-input-major); color: var(--dsw-alias-label-primary);
-  font-size: 12px; font-family: inherit; outline: none;
-}
-.lf-chip-add input:focus { border-color: var(--dsw-alias-state-business-primary); }
-.lf-rules-box {
-  background: var(--dsw-alias-interactive-bg-hover);
-  border-radius: 8px; padding: 8px 10px;
-  font-size: 11px; color: var(--dsw-alias-label-secondary); line-height: 1.7;
-}
-.lf-rules-meta { color: var(--dsw-alias-label-tertiary); font-size: 10px; }
-.lf-filter-item { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--dsw-alias-border-l1); }
-.lf-filter-item:last-child { border-bottom: none; }
-.lf-filter-info { flex: 1; min-width: 0; }
-.lf-filter-title { font-size: 11.5px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; text-decoration: none; }
-.lf-filter-title:hover { color: var(--dsw-alias-state-business-primary); }
-.lf-filter-meta { font-size: 10px; color: var(--dsw-alias-label-tertiary); margin-top: 1px; }
-.lf-filter-reason { font-size: 10px; padding: 0 5px; border-radius: 4px; background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-tertiary); }
-.lf-unblock {
-  flex: none; border: none; background: none;
-  color: var(--dsw-alias-state-business-primary); font-size: 11px;
-  padding: 2px 6px; border-radius: 4px; cursor: pointer;
-}
-.lf-unblock:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.lf-field input:focus { border-color: var(--dsw-alias-state-business-primary); }
 .lf-save-row { display: flex; align-items: center; gap: 8px; padding: 14px; }
 .lf-primarybtn {
   height: 30px; padding: 0 18px; border: none; border-radius: 8px;
@@ -316,32 +224,6 @@ return {
   background: var(--dsw-alias-toast-bg); color: var(--dsw-static-neutral-bluish-00);
   font-size: 11px;
 }
-/* 摘要弹窗（未读/已读点击后） */
-.lf-modal {
-  position: absolute; inset: 0; z-index: 150;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--dsw-alias-bg-mask-2); padding: 16px;
-}
-.lf-modal-card {
-  background: var(--dsw-alias-bg-layer-1);
-  border: 1px solid var(--dsw-alias-border-l1); border-radius: 12px;
-  width: 100%; max-height: 82%; display: flex; flex-direction: column; overflow: hidden;
-}
-.lf-modal-head { display: flex; align-items: flex-start; gap: 8px; padding: 14px 12px 8px 14px; }
-.lf-modal-title { flex: 1; font-size: 14px; font-weight: 600; color: var(--dsw-alias-label-primary); line-height: 1.5; }
-.lf-modal-meta { padding: 0 14px 6px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--dsw-alias-label-tertiary); }
-.lf-modal-summary {
-  flex: 1; overflow-y: auto; padding: 4px 14px 12px;
-  font-size: 12.5px; line-height: 1.7; color: var(--dsw-alias-label-secondary);
-  white-space: pre-wrap; word-break: break-word;
-  scrollbar-gutter: stable;
-}
-.lf-modal-related { padding: 0 14px 10px; display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--dsw-alias-border-l1); padding-top: 10px; }
-.lf-modal-related-title { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
-.lf-modal-related-link { font-size: 12px; color: var(--dsw-alias-state-business-primary); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lf-modal-related-link:hover { text-decoration: underline; }
-.lf-modal-actions { padding: 8px 14px 14px; display: flex; justify-content: flex-end; }
-.lf-modal-actions .lf-primarybtn { text-decoration: none; display: inline-flex; align-items: center; }
 `;
     function ensureStyle() {
       if (typeof document === 'undefined') return;
@@ -371,15 +253,6 @@ return {
       return json.data;
     }
 
-    /* 思考等级兜底列表（模型未提供 efforts 元数据时使用） */
-    const FALLBACK_EFFORTS = [
-      { id: 'none', name: 'none（关闭思考）' },
-      { id: 'low', name: 'low' },
-      { id: 'medium', name: 'medium' },
-      { id: 'high', name: 'high' },
-      { id: 'max', name: 'max' },
-    ];
-
     function fmtTime(ts) {
       if (!ts) return '';
       const diff = Date.now() - ts;
@@ -394,95 +267,30 @@ return {
       return h('svg', { viewBox: '0 0 24 24', width: size || 14, height: size || 14, fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }, h('path', { d: path }));
     }
 
-    /* ── 单张卡片（含左滑手势）── */
+    /* ── 单张卡片（点击打开原文并自动标记已读）── */
     function CardItem(props) {
       const card = props.card;
-      const drag = React.useRef({ startX: 0, startY: 0, dx: 0, moved: false, dragging: false });
-      const ref = React.useRef(null);
-
-      function reset() {
-        const d = drag.current;
-        d.dragging = false;
-        const el = ref.current;
-        if (el) { el.classList.remove('lf-dragging'); el.style.transform = ''; }
-      }
-      function onPointerDown(e) {
-        if (e.button !== 0) return;
-        const d = drag.current;
-        d.startX = e.clientX; d.startY = e.clientY; d.dx = 0; d.moved = false; d.dragging = false;
-        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
-      }
-      function onPointerMove(e) {
-        const d = drag.current;
-        if (e.buttons === 0) { if (d.dragging || d.moved) reset(); return; }
-        const mx = e.clientX - d.startX;
-        const my = e.clientY - d.startY;
-        if (!d.moved && Math.abs(mx) < 6 && Math.abs(my) < 6) return;
-        d.moved = true;
-        e.preventDefault();
-        if (!d.dragging) { d.dragging = true; const el = ref.current; if (el) el.classList.add('lf-dragging'); }
-        d.dx = Math.max(-120, Math.min(0, mx));
-        const el = ref.current;
-        if (el) el.style.transform = 'translateX(' + d.dx + 'px)';
-      }
-      function onPointerUp(e) {
-        const d = drag.current;
-        try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
-        if (d.dragging) {
-          const out = d.dx <= -60;
-          reset();
-          if (out) {
-            const el = ref.current;
-            if (el) el.classList.add('lf-swiped');
-            setTimeout(() => props.onFeedback(card.id, card.feedback === 'dislike' ? null : 'dislike'), 200);
-          }
-        }
-      }
+      const compact = props.compact; // 已读标签页：仅显示标题，容纳更多条目
       function onClick(e) {
-        const d = drag.current;
-        if (d.moved) { d.moved = false; e.preventDefault(); return; }
-        // 所有卡片点击直接跳转原文（a[target=_blank] 默认行为）；未读自动标记已读
         if (!card.read) props.onMarkRead(card.id);
       }
-
-      const isDislike = card.feedback === 'dislike';
-      const compact = !!props.compact; // 紧凑模式：仅显示标题（不感兴趣/屏蔽 标签页）
-      const badge = card.isNew && !card.read ? h('span', { className: 'lf-badge' }, '新') : null;
-      const fbTag = isDislike ? h('span', { className: 'lf-feedback-tag lf-dislike' }, '不感兴趣') : null;
-      const related = card.relatedUrls && card.relatedUrls.length
-        ? h('span', { className: 'lf-related' }, '+' + card.relatedUrls.length + ' 来源') : null;
-      const cls = 'lf-card' + (card.read ? ' lf-read' : '') + (isDislike ? ' lf-dislike' : '') + (compact ? ' lf-compact' : '');
       return h('div', { className: 'lf-card-wrap' },
-        h('div', { className: 'lf-card-swipe' + (isDislike ? ' lf-remove' : '') },
-          iconSvg(isDislike ? 'M18 6 6 18' + 'M6 6l12 12' : 'M17 14V2' + 'M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z', 14),
-          h('span', null, isDislike ? '移除' : '不感兴趣'),
-        ),
         h('a', {
-          ref,
-          className: cls,
-          href: card.url,
-          target: '_blank',
-          rel: 'noreferrer',
-          draggable: false,
-          onPointerDown, onPointerMove, onPointerUp, onClick,
+          className: 'lf-card' + (card.read ? ' lf-read' : '') + (compact ? ' lf-compact' : ''),
+          href: card.url, target: '_blank', rel: 'noreferrer',
+          title: '在新标签页打开原文',
+          onClick,
         },
           h('div', { className: 'lf-card-title-row' },
             h('span', { className: 'lf-card-title' }, card.title),
-            badge,
+            (card.isNew && !card.read) ? h('span', { className: 'lf-badge' }, '新') : null,
           ),
-          card.summary && !compact ? h('div', { className: 'lf-card-summary' }, card.summary) : null,
-          compact
-            ? h('div', { className: 'lf-card-meta' },
-                card.sourceName ? h('span', { className: 'lf-source-tag' }, card.sourceName) : null,
-                h('span', { className: 'lf-card-time' }, card.read ? '已读' : '打开原文 ↗'),
-              )
-            : h('div', { className: 'lf-card-meta' },
-                card.sourceName ? h('span', { className: 'lf-source-tag' }, card.sourceName) : null,
-                related,
-                h('span', { className: 'lf-card-time' }, fmtTime(card.createdAt) || card.publishedAt || ''),
-                fbTag,
-                h('span', { className: 'lf-card-time' }, card.read ? '已读' : '打开原文 ↗'),
-              ),
+          (card.summary && !compact) ? h('div', { className: 'lf-card-summary' }, card.summary) : null,
+          h('div', { className: 'lf-card-meta' },
+            card.sourceName ? h('span', { className: 'lf-source-tag' }, card.sourceName) : null,
+            h('span', { className: 'lf-card-time' }, fmtTime(card.createdAt) || card.publishedAt || ''),
+            h('span', { className: 'lf-card-time' }, card.read ? '已读' : '打开原文 ↗'),
+          ),
         ),
       );
     }
@@ -496,8 +304,7 @@ return {
       const [toast, setToast] = React.useState(null);
       const toastTimer = React.useRef(null);
       const [tab, setTab] = React.useState('unread');
-      const [filterLog, setFilterLog] = React.useState([]);
-      const [collapsedCycles, setCollapsedCycles] = React.useState(null); // 折叠的刷新周期集合（null=默认：仅最新一轮展开）
+      const [collapsedCycles, setCollapsedCycles] = React.useState(null);
       const lastTickRef = React.useRef(null);
 
       const refresh = React.useCallback(async () => {
@@ -505,10 +312,6 @@ return {
           const res = await rpc('cards');
           if (res && res.status) setData(res);
         } catch (_) { /* 轮询失败静默 */ }
-        try {
-          const fl = await rpc('filter-log');
-          if (fl && Array.isArray(fl.items)) setFilterLog(fl.items);
-        } catch (_) { /* 屏蔽列表失败静默 */ }
       }, []);
 
       React.useEffect(() => {
@@ -536,7 +339,6 @@ return {
       const phase = status.paused ? 'paused' : (status.running ? 'running' : (status.lastError ? 'error' : 'idle'));
       const stats = status.cycleStats;
 
-      // 刷新事件完成（tick 变化）后：折叠旧周期，仅展开最新一轮；用户可单独点击展开/折叠
       React.useEffect(() => {
         if (lastTickRef.current !== status.tick) {
           lastTickRef.current = status.tick;
@@ -544,38 +346,34 @@ return {
         }
       }, [status.tick]);
 
-      const latestCards = cards.filter((c) => !c.read && c.isNew);
-      const unreadCards = cards.filter((c) => !c.read && !c.isNew);
-      const readCards = cards.filter((c) => c.read && c.feedback !== 'dislike');
-      const dislikeCards = cards.filter((c) => c.feedback === 'dislike');
+      const unreadCards = cards.filter((c) => !c.read);
+      const readCards = cards.filter((c) => c.read);
       const tabDefs = [
-        { id: 'unread', label: '未读', count: latestCards.length + unreadCards.length },
+        { id: 'unread', label: '未读', count: unreadCards.length },
         { id: 'read', label: '已读', count: readCards.length },
-        { id: 'dislike', label: '不感兴趣', count: dislikeCards.length },
-        { id: 'blocked', label: '屏蔽', count: filterLog.length },
       ];
 
-      const STAGE_LABELS = { coarse: '粗搜', judge: '筛选', cluster: '聚类', fine: '精读摘要', land: '落卡', translate: '翻译屏蔽标题', rules: '规则学习', done: '完成' };
+      const STAGE_LABELS = { coarse: '拉取', judge: '价值筛选', fine: '摘要', land: '落卡' };
       const prog = status.progress || {};
       const runningText = '采集中 · ' + (STAGE_LABELS[prog.stage] || '整理') + (prog.detail ? ' · ' + prog.detail : '');
 
       const statusText = status.paused
         ? '已暂停 · 上次刷新 ' + (status.lastRunAt ? fmtTime(status.lastRunAt) : '—')
         : (status.running ? runningText
-          : (status.lastError ? '上次周期失败 · 重试中(' + (status.retrying || 1) + '/2)'
+          : (status.lastError ? '上次周期失败' + ((status.retrying || 0) > 0 ? ' · 重试中(' + status.retrying + '/2)' : '')
             : '上次刷新 ' + (status.lastRunAt ? fmtTime(status.lastRunAt) : '—') + ' · ' +
-              ((status.sourceErrors || []).length ? (status.sourceErrors.length + ' 个源出错') : (status.sourceErrors && cards.length ? '正常' : '待配置'))));
+              ((status.sourceErrors || []).length ? (status.sourceErrors.length + ' 个源出错') : (cards.length ? '正常' : '等待首次采集'))));
 
       const statusTip =
         '<div class="tt-title">采集状态</div>' +
         '<div class="tt-row">上次刷新：' + (status.lastRunAt ? new Date(status.lastRunAt).toLocaleString() : '—') + '</div>' +
         '<div class="tt-row">运行周期：' + (status.tick || 0) + ' · 状态：' + (status.paused ? '已暂停' : (status.running ? '采集中 · ' + (STAGE_LABELS[prog.stage] || '整理') + (prog.detail ? ' · ' + prog.detail : '') : (status.lastError ? '出错' : '正常'))) + '</div>' +
-        '<div class="tt-row">搜索源：' + ((status.sourceErrors || []).length ? '<span class="tt-err">' + status.sourceErrors.length + ' 出错</span>' : '<span class="tt-ok">正常</span>') + '</div>' +
+        '<div class="tt-row">源：' + ((status.sourceErrors || []).length ? '<span class="tt-err">Linux Do 出错</span>' : '<span class="tt-ok">Linux Do 正常</span>') + '</div>' +
         (status.lastError ? '<div class="tt-row tt-err">错误：' + status.lastError + '</div>' : '') +
         (status.sourceErrors || []).map((s) => '<div class="tt-row">· ' + s.sourceId + ' — ' + s.message + '</div>').join('');
       const statsTip =
         '<div class="tt-title">本次周期统计</div>' +
-        '<div class="tt-row">扫描 ' + (stats ? stats.scanned : 0) + ' 条 → 精选 ' + (stats ? stats.selected : 0) + ' 条 → 屏蔽 ' + (stats ? stats.filtered : 0) + ' 条</div>';
+        '<div class="tt-row">拉取 ' + (stats ? stats.scanned : 0) + ' 条 → 输出 ' + (stats ? stats.selected : 0) + ' 条（过滤 ' + (stats ? stats.filtered : 0) + ' 条）</div>';
 
       // ── 按刷新周期分组（cycle 为刷新事件时间戳；缺失/历史条目归入「更早」）──
       function groupItems(items, timeOf) {
@@ -593,7 +391,7 @@ return {
       function isCycleCollapsed(cycle, groups) {
         if (collapsedCycles !== null) return collapsedCycles.has(cycle);
         const newest = groups.length ? groups[0].cycle : null;
-        return cycle !== newest; // 默认：仅最新一轮展开
+        return cycle !== newest;
       }
       function toggleCycle(cycle, groups) {
         setCollapsedCycles((prev) => {
@@ -603,7 +401,6 @@ return {
           return set;
         });
       }
-      // 周期组头：显示该轮刷新的相对时间；点击展开/折叠
       function cycleGroup(g, groups, children) {
         const collapsed = isCycleCollapsed(g.cycle, groups);
         const label = g.cycle < 0 ? '更早' : ('刷新于 ' + (g.time ? fmtTime(g.time) : ''));
@@ -621,11 +418,10 @@ return {
         );
       }
 
-      function renderCard(c) {
+      function renderCard(c, compact) {
         return h(CardItem, {
-          key: c.id, card: c, compact: tab === 'dislike',
-          onMarkRead: (id) => { call('dsh-livefeed/mark', { cardId: id, read: true }); refresh(); },
-          onFeedback: (id, fb) => { call('dsh-livefeed/mark', { cardId: id, feedback: fb }); refresh(); },
+          key: c.id, card: c, compact,
+          onMarkRead: async (id) => { await call('dsh-livefeed/mark', { cardId: id, read: true }); refresh(); },
         });
       }
 
@@ -634,44 +430,21 @@ return {
           h('div', { className: 'lf-empty-icon' }, iconSvg('M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z', 18)),
           h('p', null, main),
           sub ? h('p', { className: 'sub' }, sub) : null,
-          withRefresh ? h('button', { className: 'lf-ghostbtn', onClick: () => { call('dsh-livefeed/refresh'); showToast('已触发刷新'); } }, '立即刷新') : null,
+          withRefresh ? h('button', { className: 'lf-ghostbtn', onClick: async () => { const r4 = await call('dsh-livefeed/refresh'); showToast(r4 && r4.accepted === false ? (r4.reason === 'paused' ? '已暂停，请先恢复' : '采集进行中') : '已触发刷新'); } }, '立即刷新') : null,
         );
       }
 
       function listContent() {
-        if (tab === 'blocked') {
-          if (!filterLog.length) return emptyEl('暂无被屏蔽内容', '被过滤掉的条目会显示在这里，可撤销恢复', false);
-          const groups = groupItems(filterLog, (it) => (it.ts ? Date.parse(it.ts) : 0));
-          return h('div', null, groups.map((g) => cycleGroup(g, groups,
-            g.items.map((it, i) => h('div', { key: i, className: 'lf-filter-item' },
-              h('div', { className: 'lf-filter-info' },
-                h('a', { className: 'lf-filter-title', href: it.url, target: '_blank', rel: 'noreferrer', title: '在新标签页打开原文' }, it.title),
-                h('div', { className: 'lf-filter-meta' }, it.sourceId + ' · ' + (it.reason === 'block-keyword' ? '屏蔽词命中' : (it.reason === 'max-candidates' ? '候选上限截断' : '模型筛选')) + ' · ' + fmtTime(it.ts ? Date.parse(it.ts) : 0)),
-              ),
-              h('button', { className: 'lf-unblock', onClick: async () => {
-                await call('dsh-livefeed/unblock', { url: it.url });
-                refresh();
-                showToast('已撤销：该条目已恢复为未读卡片 ✓');
-              } }, '撤销'),
-            )),
-          )));
-        }
         if (tab === 'unread') {
-          const unread = cards.filter((c) => !c.read);
-          if (!unread.length) {
-            return emptyEl('暂无未读内容', status.paused ? '采集已暂停' : '在设置中启用搜索源后开始采集', true);
+          if (!unreadCards.length) {
+            return emptyEl('暂无未读内容', status.paused ? '采集已暂停' : '点击「立即刷新」从 Linux Do 拉取话题', true);
           }
-          const groups = groupItems(unread, (c) => c.createdAt || 0);
-          return h('div', null, groups.map((g) => cycleGroup(g, groups, g.items.map(renderCard))));
+          const groups = groupItems(unreadCards, (c) => c.createdAt || 0);
+          return h('div', null, groups.map((g) => cycleGroup(g, groups, g.items.map((c) => renderCard(c, false)))));
         }
-        if (tab === 'read') {
-          if (!readCards.length) return emptyEl('暂无已读内容', '', false);
-          const groups = groupItems(readCards, (c) => c.createdAt || 0);
-          return h('div', null, groups.map((g) => cycleGroup(g, groups, g.items.map(renderCard))));
-        }
-        // dislike：不折叠，平铺展示（用户主动标记的内容需要一眼可见）
-        if (!dislikeCards.length) return emptyEl('暂无不感兴趣内容', '在未读/已读中左滑卡片即可标记', false);
-        return h('div', null, dislikeCards.map(renderCard));
+        if (!readCards.length) return emptyEl('暂无已读内容', '', false);
+        const groups = groupItems(readCards, (c) => c.createdAt || 0);
+        return h('div', null, groups.map((g) => cycleGroup(g, groups, g.items.map((c) => renderCard(c, true)))));
       }
 
       return h('div', null,
@@ -689,7 +462,7 @@ return {
             settingsOpen ? null : h('button', {
               className: 'lf-iconbtn',
               title: '立即刷新',
-              onClick: () => { call('dsh-livefeed/refresh'); showToast('已触发刷新'); },
+              onClick: async () => { const r3 = await call('dsh-livefeed/refresh'); showToast(r3 && r3.accepted === false ? (r3.reason === 'paused' ? '已暂停，请先恢复' : '采集进行中') : '已触发刷新'); },
             }, iconSvg('M21 12a9 9 0 1 1-2.64-6.36' + 'M21 3v6h-6', 14)),
             settingsOpen ? null : h('button', {
               className: 'lf-iconbtn',
@@ -701,7 +474,7 @@ return {
             h('span', { className: 'lf-dot' }),
             h('span', { className: 'lf-status-text', onMouseEnter: (e) => showTip(e, statusTip), onMouseLeave: () => setTip(null) }, statusText),
             stats ? h('span', { className: 'lf-cycle-stats', onMouseEnter: (e) => showTip(e, statsTip), onMouseLeave: () => setTip(null) },
-              '本次 ' + stats.scanned + '→' + stats.selected + '→' + stats.filtered) : null,
+              '本次 ' + stats.scanned + '→' + stats.selected) : null,
             h('button', { className: 'lf-mark-all', onClick: async () => { await call('dsh-livefeed/set-paused', { paused: !status.paused }); refresh(); } },
               status.paused ? '恢复' : '暂停'),
             h('button', { className: 'lf-mark-all', onClick: async () => { await call('dsh-livefeed/mark-all-read'); refresh(); showToast('已全部标记已读 ✓'); } }, '全部已读'),
@@ -739,30 +512,12 @@ return {
       );
     }
 
-    /* ── 设置视图 ── */
+    /* ── 设置视图（只有两个参数：拉取数量 / 输出数量）── */
     function SettingsView(props) {
       const [cfg, setCfg] = React.useState(null);
-      const [catalog, setCatalog] = React.useState(null);
-      const [rules, setRules] = React.useState(null);
-      const [useDefault, setUseDefault] = React.useState(true);
-      const [provider, setProvider] = React.useState('');
-      const [model, setModel] = React.useState('');
-      const [effort, setEffort] = React.useState('');
-      const [intervalMin, setIntervalMin] = React.useState(60);
-      const [archiveMax, setArchiveMax] = React.useState(5000);
-      const [maxCoarse, setMaxCoarse] = React.useState(15);
-      const [maxFine, setMaxFine] = React.useState(5);
-      const [srcMax, setSrcMax] = React.useState({}); // { [sourceId]: { coarse, fine } }，null 表示跟随全局
-      const [threshOpen, setThreshOpen] = React.useState(false);
-      const [toggles, setToggles] = React.useState({});
-      const [interests, setInterests] = React.useState([]);
-      const [blockWords, setBlockWords] = React.useState([]);
-      const [interestInput, setInterestInput] = React.useState('');
-      const [blockInput, setBlockInput] = React.useState('');
-      const [wordDirty, setWordDirty] = React.useState(false);
+      const [fetchCount, setFetchCount] = React.useState(40);
+      const [outputCount, setOutputCount] = React.useState(8);
       const [loadError, setLoadError] = React.useState(null);
-      const [catalogMsg, setCatalogMsg] = React.useState('加载中…');
-      const [reloadTick, setReloadTick] = React.useState(0);
 
       React.useEffect(() => {
         (async () => {
@@ -770,225 +525,60 @@ return {
             const c = await rpc('config');
             if (c && c.config) {
               setCfg(c.config);
-              setIntervalMin(c.config.intervalMinutes || 60);
-              setArchiveMax(c.config.archiveMaxEntries || 5000);
-              setMaxCoarse(c.config.maxCoarseItems || 15);
-              setMaxFine(c.config.maxCandidatesPerSource || 5);
-              setUseDefault(!c.config.model);
-              if (c.config.model) { setProvider(c.config.model.provider || ''); setModel(c.config.model.model || ''); setEffort(c.config.model.reasoningEffort || ''); }
-              setInterests(c.config.interests || []);
-              setBlockWords(c.config.blockWords || []);
-              const t = {};
-              const m = {};
-              (c.config.sources || []).forEach((s) => { t[s.id] = !!s.enabled; m[s.id] = { coarse: typeof s.maxItems === 'number' ? s.maxItems : null, fine: typeof s.maxCandidates === 'number' ? s.maxCandidates : null }; });
-              setToggles(t);
-              setSrcMax(m);
+              setFetchCount(Number(c.config.fetchCount) || 40);
+              setOutputCount(Number(c.config.outputCount) || 8);
             }
           } catch (e) { setLoadError('配置加载失败：' + String((e && e.message) || e)); }
-          setCatalogMsg('加载中…');
-          try {
-            const cat = await rpc('model-catalog');
-            if (cat && Array.isArray(cat.providers)) {
-              setCatalog(cat.providers);
-              setCatalogMsg(cat.providers.length + ' 个提供商可用');
-            } else {
-              setCatalogMsg('返回了空目录');
-            }
-          } catch (e) { setCatalogMsg('加载失败：' + String((e && e.message) || e)); }
-          try {
-            const r = await rpc('rules');
-            if (r && r.rules) setRules(r.rules);
-          } catch (_) { /* 规则预览失败不阻塞 */ }
         })();
-      }, [reloadTick]);
-
-      const sources = (cfg && cfg.sources) || [];
-      // catalog 存的是数组（setCatalog(cat.providers)）
-      const providers = Array.isArray(catalog) ? catalog : ((catalog && catalog.providers) || []);
-      const models = providers.find((p) => p.id === provider) || { models: [] };
-      const currentModel = models.models.find((m) => m.id === model) || null;
-      // 思考等级跟随所选模型的能力（efforts），无元数据时回退固定列表
-      const effortOptions = (currentModel && Array.isArray(currentModel.efforts) && currentModel.efforts.length)
-        ? currentModel.efforts
-        : FALLBACK_EFFORTS;
+      }, []);
 
       async function saveAll() {
-        const payload = {
-          intervalMinutes: intervalMin,
-          archiveMaxEntries: archiveMax,
-          maxCoarseItems: maxCoarse,
-          maxCandidatesPerSource: maxFine,
-          model: useDefault ? null : { provider, model, reasoningEffort: effort || undefined },
-          interests,
-          blockWords,
-          sources: sources.map((s) => ({
-            id: s.id,
-            enabled: toggles[s.id] !== undefined ? toggles[s.id] : !!s.enabled,
-            maxItems: (srcMax[s.id] && srcMax[s.id].coarse) || null,
-            maxCandidates: (srcMax[s.id] && srcMax[s.id].fine) || null,
-          })),
-        };
-        await rpc('update-settings', payload);
-        if (wordDirty) await rpc('update-words', { interests, blockWords });
-        props.showToast('设置已保存 ✓ · 下一刷新周期生效');
-        props.refresh();
-        props.onBack();
-      }
-      function addChip(list, setList, input, setInput, kind) {
-        const v = input.trim();
-        if (v && list.indexOf(v) < 0) { setList(list.concat([v])); setWordDirty(true); }
-        setInput('');
-      }
-      function removeChip(list, setList, i) {
-        const next = list.slice(); next.splice(i, 1); setList(next); setWordDirty(true);
+        // 客户端先行钳制（服务端同样有边界校验，双保险）
+        const fc = Math.max(1, Math.min(200, Math.round(Number(fetchCount) || 1)));
+        const oc = Math.max(1, Math.min(50, Math.round(Number(outputCount) || 1)));
+        try {
+          await rpc('update-settings', {
+            fetchCount: fc,
+            outputCount: oc,
+          });
+          props.showToast('设置已保存 ✓ · 下一刷新周期生效');
+          props.refresh();
+          props.onBack();
+        } catch (e) {
+          props.showToast('保存失败：' + String((e && e.message) || e));
+        }
       }
 
       return h('div', { className: 'lf-settings' },
         h('div', { className: 'lf-scroll' },
-          // 模型选择
           h('div', { className: 'lf-sec' },
-            h('div', { className: 'lf-sec-title' }, '模型选择'),
-            loadError ? h('div', { className: 'lf-rules-box', style: { color: 'var(--dsw-alias-state-error-primary)' } }, loadError) : null,
-            h('div', { className: 'lf-rules-meta', style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, color: catalogMsg.indexOf('失败') >= 0 || catalogMsg === '返回了空目录' ? 'var(--dsw-alias-state-error-primary)' : undefined } },
-              h('span', null, '模型目录：' + catalogMsg),
-              h('button', { className: 'lf-unblock', onClick: () => setReloadTick(reloadTick + 1) }, '重新加载'),
+            h('div', { className: 'lf-sec-title' }, '采集参数'),
+            loadError ? h('div', { style: { color: 'var(--dsw-alias-state-error-primary)', fontSize: 11, marginBottom: 8 } }, loadError) : null,
+            h('label', { className: 'lf-field' },
+              h('span', null, '拉取数量（单次从「最新 + 最热门」共拉取的话题数）'),
+              h('input', {
+                type: 'number', min: 1, max: 200, value: fetchCount,
+                onChange: (e) => setFetchCount(Number(e.target.value) || 1),
+              }),
             ),
-            h('label', { className: 'lf-field' }, h('span', null, '提供商'), h('select', {
-              value: provider, disabled: useDefault,
-              onChange: (e) => { setProvider(e.target.value); setModel(''); setEffort(''); },
-            },
-              h('option', { value: '' }, useDefault ? '（跟随默认模型）' : '选择提供商'),
-              providers.map((p) => h('option', { key: p.id, value: p.id }, p.name || p.id)))),
-            h('label', { className: 'lf-field' }, h('span', null, '模型'), h('select', {
-              value: model, disabled: useDefault,
-              onChange: (e) => { setModel(e.target.value); setEffort(''); },
-            },
-              h('option', { value: '' }, useDefault ? '（跟随默认模型）' : '选择模型'),
-              models.models.map((m) => h('option', { key: m.id, value: m.id }, m.name || m.id)))),
-            h('label', { className: 'lf-field' }, h('span', null, '思考等级（reasoning effort）'), h('select', {
-              value: effort, disabled: useDefault || !provider || !model,
-              onChange: (e) => setEffort(e.target.value),
-            },
-              h('option', { value: '' }, '跟随默认'),
-              effortOptions.map((x) => h('option', { key: x.id, value: x.id }, x.name)))),
-            h('label', { className: 'lf-check' },
-              h('input', { type: 'checkbox', checked: useDefault, onChange: (e) => setUseDefault(e.target.checked) }),
-              h('span', null, '跟随当前默认模型'),
-              h('span', { className: 'hint' }, '（不填时用会话默认模型+等级）'),
+            h('label', { className: 'lf-field' },
+              h('span', null, '输出数量（AI 按价值筛选后输出的卡片数）'),
+              h('input', {
+                type: 'number', min: 1, max: 50, value: outputCount,
+                onChange: (e) => setOutputCount(Number(e.target.value) || 1),
+              }),
             ),
-          ),
-          // 刷新间隔
-          h('div', { className: 'lf-sec' },
-            h('div', { className: 'lf-sec-title' }, '刷新间隔'),
-            h('label', { className: 'lf-field' }, h('span', null, '间隔时间（分钟）'), h('input', {
-              type: 'number', min: 1, max: 1440, value: intervalMin,
-              onChange: (e) => setIntervalMin(Number(e.target.value) || 10),
-            })),
-          ),
-          // 搜索源管理（阈值设置收进 ⚙ 弹卡）
-          h('div', { className: 'lf-sec' },
-            h('div', { className: 'lf-sec-title-row' },
-              h('div', { className: 'lf-sec-title' }, '搜索源管理'),
-              h('button', { className: 'lf-gearbtn', title: '阈值设置（粗搜/精搜上限）', onClick: () => setThreshOpen(true) }, '⚙'),
-            ),
-            sources.length ? sources.map((s) => h('div', { key: s.id, className: 'lf-source-row' + (toggles[s.id] === false ? ' lf-disabled' : '') },
-              h('div', { className: 'lf-source-info' },
-                h('div', { className: 'lf-source-name' }, s.name || s.id),
-                h('div', { className: 'lf-source-id' }, s.id + ' · 查询：' + (s.query || '全量抓取（无关键词）')),
-              ),
-              h('label', { className: 'lf-switch' },
-                h('input', { type: 'checkbox', checked: toggles[s.id] !== false, onChange: (e) => setToggles(Object.assign({}, toggles, { [s.id]: e.target.checked })) }),
-                h('span', { className: 'lf-switch-track' }),
-              ),
-            )) : h('p', { className: 'lf-rules-meta' }, '暂无搜索源，可手动编辑 config.json 添加'),
-          ),
-          // 智能过滤
-          h('div', { className: 'lf-sec' },
-            h('div', { className: 'lf-sec-title' }, '智能过滤（AI 学习）'),
-            h('div', { className: 'lf-rules-box' },
-              h('div', null, '屏蔽：' + ((rules && rules.block || []).join(' · ') || '暂无')),
-              h('div', { className: 'lf-rules-meta' }, '最近学习：' + (rules && rules.updatedAt ? new Date(rules.updatedAt).toLocaleString() : '—') + ' · 仅记录「不感兴趣」标记，正向偏好由兴趣词表达，避免信息茧房'),
-            ),
-            h('div', { style: { display: 'flex', gap: 8, marginTop: 10 } },
-              h('button', { className: 'lf-ghostbtn', onClick: async () => { await rpc('rerun-rules'); props.showToast('规则重训已触发'); } }, '立即重新学习'),
-            ),
-          ),
-          // 兴趣词
-          h('div', { className: 'lf-sec' },
-            h('div', { className: 'lf-sec-title' }, '兴趣词（正向偏好，写入 config.json）'),
-            h('div', { className: 'lf-chips' },
-              interests.map((w, i) => h('span', { key: w, className: 'lf-chip' }, w, h('button', { onClick: () => removeChip(interests, setInterests, i) }, '×'))),
-            ),
-            h('div', { className: 'lf-chip-add' },
-              h('input', { value: interestInput, placeholder: '添加兴趣词，回车确认', onChange: (e) => setInterestInput(e.target.value), onKeyDown: (e) => { if (e.key === 'Enter') addChip(interests, setInterests, interestInput, setInterestInput); } }),
-              h('button', { className: 'lf-ghostbtn', style: { margin: 0, height: 26 }, onClick: () => addChip(interests, setInterests, interestInput, setInterestInput) }, '添加'),
-            ),
-          ),
-          // 屏蔽词
-          h('div', { className: 'lf-sec' },
-            h('div', { className: 'lf-sec-title' }, '屏蔽词（用户层，与 AI 学习合并生效）'),
-            h('div', { className: 'lf-chips' },
-              blockWords.map((w, i) => h('span', { key: w, className: 'lf-chip' }, w, h('button', { onClick: () => removeChip(blockWords, setBlockWords, i) }, '×'))),
-            ),
-            h('div', { className: 'lf-chip-add' },
-              h('input', { value: blockInput, placeholder: '添加屏蔽词，回车确认', onChange: (e) => setBlockInput(e.target.value), onKeyDown: (e) => { if (e.key === 'Enter') addChip(blockWords, setBlockWords, blockInput, setBlockInput); } }),
-              h('button', { className: 'lf-ghostbtn', style: { margin: 0, height: 26 }, onClick: () => addChip(blockWords, setBlockWords, blockInput, setBlockInput) }, '添加'),
-            ),
-          ),
-          // 被屏蔽内容已迁至面板「屏蔽」标签页（紧凑标题 + 撤销）
-          // 数据归档
-          h('div', { className: 'lf-sec' },
-            h('div', { className: 'lf-sec-title' }, '数据归档'),
-            h('label', { className: 'lf-field' }, h('span', null, '归档上限（条，超出滚动清理）'), h('input', {
-              type: 'number', min: 100, max: 100000, value: archiveMax,
-              onChange: (e) => setArchiveMax(Number(e.target.value) || 5000),
-            })),
           ),
           h('div', { className: 'lf-save-row' },
             h('button', { className: 'lf-primarybtn', onClick: saveAll }, '保存'),
-            h('button', { className: 'lf-ghostbtn', onClick: () => {
-              setUseDefault(true); setIntervalMin(60); setArchiveMax(5000); setMaxCoarse(15); setMaxFine(5); setSrcMax({});
-              const t = {}; sources.forEach((s) => { t[s.id] = true; });
-              setToggles(t);
-            } }, '恢复默认'),
+            h('button', { className: 'lf-ghostbtn', onClick: () => { setFetchCount(40); setOutputCount(8); } }, '恢复默认'),
           ),
-          h('p', { className: 'lf-settings-note' }, '保存后写入 config.json，下一个刷新周期生效；关闭的搜索源将跳过采集。'),
+          h('p', { className: 'lf-settings-note' },
+            '源固定为 Linux Do；带「富可敌国」标签的推广话题自动屏蔽；' +
+            '其余话题由 AI 按价值筛选（回复数/内容质量等，不按主题过滤）；' +
+            '已读/已采集的话题不会重复拉取。刷新间隔与模型可在 config.json 中调整。',
+          ),
         ),
-        // 阈值设置弹卡（⚙ 按钮打开）
-        threshOpen ? h('div', { className: 'lf-modal', onClick: () => setThreshOpen(false) },
-          h('div', { className: 'lf-modal-card', onClick: (e) => e.stopPropagation() },
-            h('div', { className: 'lf-modal-head' },
-              h('div', { className: 'lf-modal-title' }, '阈值设置'),
-              h('button', { className: 'lf-iconbtn', title: '关闭', onClick: () => setThreshOpen(false) },
-                iconSvg('M18 6 6 18' + 'M6 6l12 12', 14)),
-            ),
-            h('div', { className: 'lf-thresh-body' },
-              h('div', { className: 'lf-thresh-global' },
-                h('label', { className: 'lf-thresh-item' }, h('span', null, '粗搜默认上限'), h('input', { type: 'number', min: 1, max: 100, value: maxCoarse, onChange: (e) => setMaxCoarse(Number(e.target.value) || 15) })),
-                h('label', { className: 'lf-thresh-item' }, h('span', null, '精搜默认上限'), h('input', { type: 'number', min: 1, max: 20, value: maxFine, onChange: (e) => setMaxFine(Number(e.target.value) || 5) })),
-              ),
-              h('p', { className: 'lf-thresh-note' }, '默认值应用于未单独设置的源；源级数值覆盖全局，留空 = 跟随全局。修改后请在主设置界面点「保存」生效。'),
-              sources.length ? sources.map((s) => h('div', { key: s.id, className: 'lf-thresh-src' },
-                h('div', { className: 'lf-thresh-src-name' }, s.name || s.id),
-                h('label', { className: 'lf-thresh-item' }, h('span', null, '粗搜'), h('input', {
-                  type: 'number', min: 1, max: 100,
-                  placeholder: String(maxCoarse),
-                  value: (srcMax[s.id] && srcMax[s.id].coarse) || '',
-                  onChange: (e) => { const v = e.target.value; const n = v === '' ? null : (Number(v) || null); setSrcMax(Object.assign({}, srcMax, { [s.id]: Object.assign({}, srcMax[s.id] || {}, { coarse: n }) })); },
-                })),
-                h('label', { className: 'lf-thresh-item' }, h('span', null, '精搜'), h('input', {
-                  type: 'number', min: 1, max: 20,
-                  placeholder: String(maxFine),
-                  value: (srcMax[s.id] && srcMax[s.id].fine) || '',
-                  onChange: (e) => { const v = e.target.value; const n = v === '' ? null : (Number(v) || null); setSrcMax(Object.assign({}, srcMax, { [s.id]: Object.assign({}, srcMax[s.id] || {}, { fine: n }) })); },
-                })),
-              )) : h('p', { className: 'lf-thresh-note' }, '暂无搜索源'),
-            ),
-            h('div', { className: 'lf-modal-actions' },
-              h('button', { className: 'lf-ghostbtn', style: { margin: 0 }, onClick: () => setThreshOpen(false) }, '关闭'),
-            ),
-          ),
-        ) : null,
       );
     }
 

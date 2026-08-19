@@ -1,42 +1,67 @@
-/* LiveFeed 源：Linux Do 论坛（linux.do，Discourse）
+/* LiveFeed 源：Linux Do 论坛（linux.do，Discourse）—— 唯一固定源
  *
  * 背景：linux.do 全站位于 Cloudflare 托管质询之后，纯 HTTP 客户端一律 403。
  * config.json 本源行配置 "fetch": "browser" → Host 用系统 Edge（有头离屏，
  * playwright-core）直连抓取，走系统代理，不依赖任何第三方服务。
  *
- * 粗搜三条路径（顺序：最新 → 热门 → 本周排行；跨列表去重）：
- * 1. latest.json —— 全站最新 30 条话题；
- * 2. hot.json —— 热门话题（heat 热度排序，含较早发布但仍在活跃的话题）；
- * 3. top.json?period=weekly —— 本周排行（点赞/浏览量维度）。
- * 各列表均过滤置顶帖；config 的 maxItems 决定合并后送入筛选的总数（建议 ≥90）。
+ * 粗搜两条列表（顺序：最新 → 最热门；跨列表按 URL 去重；跳过置顶帖）：
+ * 1. latest.json —— 全站最新话题（分页翻取）；
+ * 2. hot.json —— 热门话题（heat 热度排序，含较早发布但仍在活跃的话题）。
+ * cfg.maxItems = fetchCount：单次从两个列表共收集 target 条「新」话题（跳过已读/已采集与固定屏蔽标签）。
  * （linux.do 的 search.json 对匿名请求限流 429，故不使用搜索接口；query 留空）
  * 精搜：话题 JSON（/t/{id}.json）→ 首帖 cooked(HTML) 转文本
+ *
+ * 条目额外携带 replyCount/views/likes/tags 等字段，供 Host 的 AI 价值筛选使用。
  */
+// 轻量 URL 归一化：去 scheme/fragment/尾斜杠（与 Host 的 seenUrls 比对口径一致，兼容 http/https 变体）
+function normUrl(u) {
+  return String(u || '').replace(/^https?:\/\//i, '').split('#')[0].replace(/\/+$/, '');
+}
+
 async function coarseSearch(api) {
+  const cfg = await api.config(null);
+  const target = Math.max(1, Number(cfg && cfg.maxItems) || 40); // 目标：收集 target 条「新」话题（= 拉取数量）
+  const seenUrls = new Set((await api.seenUrls(null) || []).map(normUrl)); // 已读/已采集 URL（Host 传入，按 URL 去重不重复拉取）
+  const blockTags = Array.isArray(cfg && cfg.blockTags) ? cfg.blockTags.map(String) : []; // 固定屏蔽标签
   const out = [];
   const seen = new Set();
   const listUrls = [
     'https://linux.do/latest.json',
     'https://linux.do/hot.json',
-    'https://linux.do/top.json?period=weekly',
   ];
   for (const listUrl of listUrls) {
-    const page = await fetchPage(api, listUrl);
-    const data = parseJsonBody(page.body.content, listUrl.split('/').pop());
-    const topics = (data && data.topic_list && data.topic_list.topics) || [];
-    for (const t of topics) {
-      if (!t || !t.id || !t.title) continue;
-      if (t.pinned) continue; // 置顶帖（论坛公告等）每周期重复出现，跳过
-      const slug = String(t.slug || '');
-      const itemUrl = 'https://linux.do/t/' + (slug ? slug + '/' : '') + t.id;
-      if (seen.has(itemUrl)) continue; // 跨列表按 URL 去重（各列表常有重叠）
-      seen.add(itemUrl);
-      out.push({
-        title: String(t.title).slice(0, 300),
-        url: itemUrl,
-        snippet: String(t.blurb || '').slice(0, 500),
-        publishedAt: t.created_at || undefined,
-      });
+    if (out.length >= target) break;
+    // Discourse 分页为 0 基：page=0（不带参数）才是第一页
+    for (let page = 0; page <= 6 && out.length < target; page++) {
+      const listPageUrl = page === 0 ? listUrl : listUrl + (listUrl.indexOf('?') >= 0 ? '&' : '?') + 'page=' + page;
+      const data = parseJsonBody((await fetchPage(api, listPageUrl)).body.content, listUrl.split('/').pop() + ' p' + page);
+      const topics = (data && data.topic_list && data.topic_list.topics) || [];
+      if (!topics.length) break; // 翻到空页即止
+      for (const t of topics) {
+        if (out.length >= target) break;
+        if (!t || !t.id || !t.title) continue;
+        if (t.pinned) continue; // 置顶帖（论坛公告等）每周期重复出现，跳过
+        const slug = String(t.slug || '');
+        const itemUrl = 'https://linux.do/t/' + (slug ? slug + '/' : '') + t.id;
+        if (seen.has(itemUrl)) continue; // 跨列表按 URL 去重（各列表常有重叠）
+        seen.add(itemUrl);
+        if (seenUrls.has(normUrl(itemUrl))) continue; // 已读/已采集 → 不重复拉取
+        const title = String(t.title || '');
+        const tags = Array.isArray(t.tags) ? t.tags.map(String) : [];
+        // 固定屏蔽：只屏蔽「富可敌国」（标签含或标题任意位置含），其余一概不在此过滤
+        if (blockTags.some((b) => tags.indexOf(b) >= 0 || title.indexOf(b) >= 0)) continue;
+        out.push({
+          title: title.slice(0, 300),
+          url: itemUrl,
+          snippet: String(t.blurb || '').slice(0, 500),
+          publishedAt: t.created_at || undefined,
+          replyCount: Number(t.reply_count) || 0,
+          postsCount: Number(t.posts_count) || 0,
+          views: Number(t.views) || 0,
+          likes: Number(t.like_count) || 0,
+          tags,
+        });
+      }
     }
   }
   return out;
