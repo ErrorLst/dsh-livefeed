@@ -47,7 +47,8 @@
 ### 3.1 周期调度：暂停与重试
 
 - **暂停**：状态行「暂停/恢复」按钮（`dsh-livefeed/set-paused`）；`paused` 时 tick 直接跳过（不更新 `lastRunAt`，不动数据）。暂停态**不持久化**——重启后自动恢复采集，避免「忘了开启」。
-- **重试**：周期整体失败（如 llm/web 全部不可用）→ 按 `5 分钟 × 2^attempt` 指数退避重试，最多 2 次；状态行显示「重试中 (n/2)」。重试成功或放弃后恢复正常节拍（不再额外延迟）。
+- **重启不重复采集**：每次成功采集的 `lastRunAt` 持久化于 `state.json`；插件启动约 15 秒后按同一间隔判定——距上次采集不足间隔则跳过首轮，由定时器在到期后自动执行（距上次采集超间隔或从未采集过时立即执行）。时钟回拨/跨机迁移导致的未来时间戳在装载时钳制为当前时间，避免调度器永久跳过。
+- **重试**：周期整体失败（如 llm/web 全部不可用）→ 按 `5 分钟 × 2^attempt` 指数退避重试，最多 2 次；状态行显示「重试中 (n/2)」。重试成功或放弃后恢复正常节拍（不再额外延迟）。失败的周期不更新 `lastRunAt`，重启后仍会按「超间隔」补采。
 
 ### 模型调用
 
@@ -173,7 +174,7 @@
 | 文件 | 内容 | 说明 |
 | --- | --- | --- |
 | `config.json` | 间隔/模型/兴趣/搜索源 + **用户屏蔽词 `blockWords`** + **归档上限 `archiveMaxEntries`** | 面板设置保存时写回 |
-| `state.json` | **面板数据**：所有**未读**（最新+未读组）与**不感兴趣**卡片的完整内容（id/title/summary/url/relatedUrls/sourceName/publishedAt/createdAt/read/feedback）+ feedbackQueue + **`exemptUrls` 豁免集** | 每次周期落库与标记变更时写回；**已读且非不感兴趣的卡片不保存在此**（仅归档） |
+| `state.json` | **面板数据**：所有**未读**（最新+未读组）与**不感兴趣**卡片的完整内容（id/title/summary/url/relatedUrls/sourceName/publishedAt/createdAt/read/feedback）+ feedbackQueue + **`exemptUrls` 豁免集** + **`lastRunAt` 上次成功采集时间**（重启调度依据） | 每次周期落库与标记变更时写回；**已读且非不感兴趣的卡片不保存在此**（仅归档） |
 | `history.jsonl` | 全量归档：每周期所有条目 + 最终标记，追加式；**超 `archiveMaxEntries`（默认 5000）滚动截断**（保留最近 N 条） | 供规则重训抽样；面板不直接依赖 |
 | `preferences.json` | 规则文档（AI 维护，可人工编辑） | 增量学习/重训时写回 |
 

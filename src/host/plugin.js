@@ -924,6 +924,7 @@ return {
         cards: panelCards,
         exemptUrls: Array.from(state.exemptUrls),
         feedbackQueue: state.feedbackQueue.slice(-FEEDBACK_WINDOW),
+        lastRunAt: state.lastRunAt,
       }, null, 2));
     }
     async function saveConfig() {
@@ -951,6 +952,11 @@ return {
         .map((c) => Object.assign({ relatedUrls: [], isNew: false, createdAt: Date.now() }, c, { isNew: false }));
       state.exemptUrls = new Set(st && Array.isArray(st.exemptUrls) ? st.exemptUrls : []);
       state.feedbackQueue = st && Array.isArray(st.feedbackQueue) ? st.feedbackQueue.slice(-FEEDBACK_WINDOW) : [];
+      // 恢复上次成功采集时间（跨重启调度依据）：无效值忽略；未来时间（时钟回拨/跨机迁移）钳制到当前，
+      // 避免「距上次采集为负」导致调度器永久跳过。
+      if (st && typeof st.lastRunAt === 'number' && Number.isFinite(st.lastRunAt)) {
+        state.lastRunAt = Math.min(st.lastRunAt, Date.now());
+      }
       state.archive = [];
       state.seenUrls = new Set();
       const histText = await fsRead(HISTORY_FILE);
@@ -1009,11 +1015,11 @@ return {
         await stageTranslateRejected();
         state.progress = { stage: 'rules', detail: '', ts: Date.now() };
         await stageRules();
-        await saveState();
         state.cycleStats = stats;
         state.lastError = undefined;
         state.lastRunAt = Date.now();
         state.tick += 1;
+        await saveState(); // 顺序在 lastRunAt 之后：连同上次采集时间一并持久化（重启调度依据）
       } catch (err) {
         state.lastError = String((err && err.message) || err);
         console.error('[dsh-livefeed] cycle failed:', err);
@@ -1305,7 +1311,17 @@ return {
       }
 
       const stopInterval = ctx.interval(tick, TICK_MS);
-      const stopBoot = ctx.timeout(() => { if (!disposed) runCycle(); }, 15 * 1000);
+      // 启动检查：距上次成功采集（持久化于 state.json 的 lastRunAt）不足间隔时跳过首轮采集，
+      // 由后续 tick 在间隔到期后自动执行 —— 重启 dsh 不再每次都重复采集；
+      // 距上次采集已超间隔（或从未采集过）时仍立即执行一轮。
+      const stopBoot = ctx.timeout(() => {
+        if (disposed || state.paused) return;
+        if (state.lastRunAt !== undefined && Date.now() - state.lastRunAt < intervalMs()) {
+          console.log('[dsh-livefeed] 距上次采集不足间隔，跳过启动采集（上次: ' + new Date(state.lastRunAt).toISOString() + '，间隔: ' + intervalMs() + 'ms）');
+          return;
+        }
+        runCycle();
+      }, 15 * 1000);
       return () => {
         disposed = true;
         if (stopRoute) stopRoute();
