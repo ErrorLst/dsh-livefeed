@@ -26,10 +26,18 @@
 
 ### 1. 安装
 
-**方式 A：Bundle 安装（推荐，开箱即用）**
+**方式 A0：一行安装（推荐）**
+
+```
+dsh plugin --profile web add github:ErrorLst/dsh-livefeed
+```
+
+安装成功后 reconcile 会自动识别包内的 `dsh.bundle.patch` 声明，把 `@dsh-external/dsh-livefeed` 追加进 web profile 的 `dsh.profile.bundles`（无需手动登记）；重启 dsh web 即挂载生效。
+
+**方式 A：本地开发安装**
 
 1. `git clone` 本仓库到本地目录（如 `C:\Users\you\dsh-livefeed`），在该目录执行 `pnpm install`；
-2. 在 web profile（`~/.dsh/profiles/web/`）的 `dsh.profile.bundles` 中加入一行 `"@dsh-external/dsh-livefeed": "link:<仓库绝对路径>"`（或在 `cordis.patch.yml` 中 `insert` 一行 `dsh-livefeed`）；
+2. 一行命令安装到 web profile：`dsh plugin --profile web add link:<仓库绝对路径>`（reconcile 自动登记 bundle 层，无需手动编辑 `dsh.profile.bundles`）；
 3. 重启 dsh web，按下一节初始化运行目录即可。
 
 **方式 B：动态 Cordis 插件（开发模式）**

@@ -16,18 +16,18 @@ return {
     // ══ 常量 ══
     // 配置目录解析（跨机器可移植，不硬编码本机路径）：
     // 1) 环境变量 DSH_LIVEFEED_DIR 优先（本机历史数据迁移：setx DSH_LIVEFEED_DIR <旧目录>）；
-    // 2) 否则默认 <用户主目录>\.dsh\dsh-livefeed。
+    // 2) 否则默认 <用户主目录>/.dsh/dsh-livefeed。
     const CONFIG_DIR = (() => {
       const env = (typeof process !== 'undefined' && process.env) ? process.env : null;
       if (env && env.DSH_LIVEFEED_DIR) return String(env.DSH_LIVEFEED_DIR).replace(/[\\/]+$/, '');
       const home = (env && (env.USERPROFILE || env.HOME)) || '.';
-      return home + '\\.dsh\\dsh-livefeed';
+      return home + '/.dsh/dsh-livefeed';
     })();
-    const CONFIG_FILE = CONFIG_DIR + '\\config.json';
-    const STATE_FILE = CONFIG_DIR + '\\state.json';
-    const HISTORY_FILE = CONFIG_DIR + '\\history.jsonl';
-    const PREFERENCES_FILE = CONFIG_DIR + '\\preferences.json';
-    const TEMPLATE_FILE = CONFIG_DIR + '\\sources\\_template.js';
+    const CONFIG_FILE = CONFIG_DIR + '/config.json';
+    const STATE_FILE = CONFIG_DIR + '/state.json';
+    const HISTORY_FILE = CONFIG_DIR + '/history.jsonl';
+    const PREFERENCES_FILE = CONFIG_DIR + '/preferences.json';
+    const TEMPLATE_FILE = CONFIG_DIR + '/sources/_template.js';
     const ROUTE_PATH = '/api/dsh-livefeed';
     const DEFAULT_INTERVAL_MIN = 60;
     const DEFAULT_MAX_CARDS = 8;
@@ -346,7 +346,7 @@ return {
     // 背景：linux.do 等站点位于 Cloudflare 托管质询之后 —— web.fetch/node fetch/curl 一律 403
     // 「Just a moment…」，无头浏览器被识别且质询永不解开；实测有头（离屏）直接放行。
     // 源级配置 fetch:"browser" 启用；浏览器走系统代理（不硬编码代理地址）。
-    const BROWSER_PROFILE_DIR = CONFIG_DIR + '\\edge-profile';
+    const BROWSER_PROFILE_DIR = CONFIG_DIR + '/edge-profile';
     const BROWSER_IDLE_MS = 90 * 1000;
     const browserSession = { ctx: null, page: null, starting: null, idleStop: null };
     function browserLog(...a) { console.log('[dsh-livefeed][browser]', ...a); }
@@ -375,7 +375,7 @@ return {
       s.starting = (async () => {
         let pw = null;
         try { pw = await import('playwright-core'); }
-        catch (_) { throw new Error('playwright-core 未安装（请在插件目录执行 pnpm add playwright-core）'); }
+        catch (_) { throw new Error('playwright-core 未安装（git 安装会自动携带依赖）'); }
         let lastErr = null;
         for (const channel of ['msedge', 'chrome']) {
           try {
@@ -484,7 +484,7 @@ return {
       if (!template) throw new Error('基类模板缺失：请确认运行目录存在 sources/_template.js');
       let script = '';
       if (source && source.script) {
-        const abs = CONFIG_DIR + '\\' + String(source.script).replace(/\//g, '\\');
+        const abs = CONFIG_DIR + '/' + String(source.script);
         const sp = await fsRead(abs);
         if (sp === null) throw new Error('源脚本不存在: ' + source.script);
         script = sp;
