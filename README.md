@@ -59,6 +59,7 @@ dsh plugin --profile web add github:ErrorLst/dsh-livefeed
 | --- | --- | --- |
 | `fetchCount` | 40 | **拉取数量**：单次从「最新 + 最热门」共拉取的话题数（1–200） |
 | `outputCount` | 8 | **输出数量**：AI 按价值筛选后输出的卡片数（1–50） |
+| `retentionDays` | 3 | **已读卡片保留天数**（1–90，过期卡片每次采集前清除；未读不清除） |
 | `intervalMinutes` | 30 | 刷新间隔（分钟），可手动编辑 |
 | `summaryLanguage` | zh-CN | 摘要标题语言 |
 | `model` | null | null=跟随默认模型；或 `{provider, model, reasoningEffort?}` |

@@ -2,6 +2,7 @@
   "intervalMinutes": 30,
   "fetchCount": 40,
   "outputCount": 8,
+  "retentionDays": 3,
   "summaryLanguage": "zh-CN",
   "model": null,
   "sources": [

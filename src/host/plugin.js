@@ -33,6 +33,7 @@ return {
     const DEFAULT_INTERVAL_MIN = 30;
     const DEFAULT_FETCH_COUNT = 40;   // 拉取数量：单次从最新+最热门共拉取的话题数
     const DEFAULT_OUTPUT_COUNT = 8;   // 输出数量：AI 价值筛选后输出的卡片数
+    const DEFAULT_RETENTION_DAYS = 3; // 已读卡片保留天数（过期卡片每次采集前清除）
     const CARD_BOUND = 300;           // 面板卡片内存上限（超出裁剪最老已读）
     const RETRY_MAX = 2;
     const RETRY_BASE_MS = 5 * 60 * 1000;
@@ -110,6 +111,7 @@ return {
         intervalMinutes: DEFAULT_INTERVAL_MIN,
         fetchCount: DEFAULT_FETCH_COUNT,
         outputCount: DEFAULT_OUTPUT_COUNT,
+        retentionDays: DEFAULT_RETENTION_DAYS, // 已读卡片保留天数
         summaryLanguage: 'zh-CN',
         model: null,
         sources: [],
@@ -750,6 +752,26 @@ return {
       await fsWrite(HISTORY_FILE, state.archive.map((x) => JSON.stringify(x)).join('\n'));
     }
 
+    // ══ 已读卡片过期清理 ══
+    function retentionMs() {
+      const d = Number(state.config && state.config.retentionDays) || DEFAULT_RETENTION_DAYS;
+      return Math.max(1, d) * 24 * 60 * 60 * 1000;
+    }
+    // 清除过期的已读卡片（每次采集前调用）：未读卡片不清除（等待阅读，由 CARD_BOUND 兜底）；
+    // 已读卡片按 readAt（兼容旧数据回退 createdAt）保留 retentionDays 天。
+    // 已清除卡片的 URL 仍留在 history.jsonl 的 seenUrls 中，不会重复采集。
+    function purgeExpiredCards() {
+      const cutoff = Date.now() - retentionMs();
+      const before = state.cards.length;
+      state.cards = state.cards.filter((c) => {
+        if (!c.read) return true;
+        const ageBase = Number(c.readAt || c.createdAt) || 0;
+        return ageBase >= cutoff;
+      });
+      const purged = before - state.cards.length;
+      if (purged > 0) console.log('[dsh-livefeed] 清除过期已读卡片 ' + purged + ' 条（保留 ' + state.config.retentionDays + ' 天）');
+    }
+
     async function loadAll() {
       const cfgText = await fsRead(CONFIG_FILE);
       state.config = mergeConfig(defaultConfig(), parseJson(cfgText, null));
@@ -758,6 +780,7 @@ return {
         .filter((c) => c && c.url)
         .slice(-CARD_BOUND)
         .map((c) => Object.assign({ isNew: false, createdAt: Date.now() }, c, { isNew: false }));
+      purgeExpiredCards(); // 每次采集（含启动装载）前清除过期的已读卡片
       if (st && typeof st.lastRunAt === 'number' && Number.isFinite(st.lastRunAt)) {
         state.lastRunAt = Math.min(st.lastRunAt, Date.now());
       }
@@ -894,6 +917,7 @@ return {
           intervalMinutes: state.config.intervalMinutes,
           fetchCount: state.config.fetchCount,
           outputCount: state.config.outputCount,
+          retentionDays: state.config.retentionDays,
           summaryLanguage: state.config.summaryLanguage,
           model: state.config.model || null,
         } : null,
@@ -909,6 +933,7 @@ return {
         const card = state.cards.find((c) => c.id === a.cardId);
         if (card && a.read === true) {
           card.read = true;
+          card.readAt = Date.now(); // 已读时间（过期清理依据）
           card.isNew = false;
           await saveState();
         }
@@ -916,8 +941,9 @@ return {
       },
       'mark-all-read': async () => {
         let changed = false;
+        const now = Date.now();
         for (const c of state.cards) {
-          if (!c.read) { c.read = true; c.isNew = false; changed = true; }
+          if (!c.read) { c.read = true; c.readAt = now; c.isNew = false; changed = true; }
         }
         if (changed) await saveState();
         return { ok: true };
@@ -932,6 +958,7 @@ return {
         if (typeof a.intervalMinutes === 'number' && a.intervalMinutes >= 1 && a.intervalMinutes <= 1440) cfg.intervalMinutes = Math.round(a.intervalMinutes);
         if (typeof a.fetchCount === 'number' && a.fetchCount >= 1 && a.fetchCount <= 200) cfg.fetchCount = Math.round(a.fetchCount);
         if (typeof a.outputCount === 'number' && a.outputCount >= 1 && a.outputCount <= 50) cfg.outputCount = Math.round(a.outputCount);
+        if (typeof a.retentionDays === 'number' && a.retentionDays >= 1 && a.retentionDays <= 90) cfg.retentionDays = Math.round(a.retentionDays);
         state.config = cfg;
         await saveConfig();
         return { ok: true };
