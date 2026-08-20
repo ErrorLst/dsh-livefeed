@@ -18,6 +18,9 @@
 return {
   inject: ['timer', 'web', 'llm', 'fs', 'agentDefaultModel', 'webServer'],
   apply(ctx) {
+    // ══ 日志：bundle 模式走 cordis logger（统一日志体系/UI 控制台可见），
+    // 动态 harness 模式（Builtins 仅 console）自动兜底 ══
+    const log = ctx.logger || console;
     // ══ 常量 ══
     const CONFIG_DIR = (() => {
       const env = (typeof process !== 'undefined' && process.env) ? process.env : null;
@@ -84,7 +87,7 @@ return {
         await ctx.fs.writeText(target, content);
         return true;
       } catch (err) {
-        console.error('[dsh-livefeed] write failed:', absPath, String(err && err.message || err));
+        log.error('[dsh-livefeed] write failed:', absPath, String(err && err.message || err));
         return false;
       }
     }
@@ -301,7 +304,7 @@ return {
         } catch (err) {
           lastErr = err;
           const code = (err && err.cause && err.cause.code) || '';
-          console.warn('[dsh-livefeed] node fetch attempt ' + attempt + '/2 failed:', String(url), code || String((err && err.message) || err));
+          log.warn('[dsh-livefeed] node fetch attempt ' + attempt + '/2 failed:', String(url), code || String((err && err.message) || err));
         }
       }
       const code = (lastErr && lastErr.cause && lastErr.cause.code) || '';
@@ -339,7 +342,7 @@ return {
     const BROWSER_PROFILE_DIR = CONFIG_DIR + '/edge-profile';
     const BROWSER_IDLE_MS = 90 * 1000;
     const browserSession = { ctx: null, page: null, starting: null, idleStop: null };
-    function browserLog(...a) { console.log('[dsh-livefeed][browser]', ...a); }
+    function browserLog(...a) { log.info('[dsh-livefeed][browser]', ...a); }
     async function closeBrowserSession() {
       const s = browserSession;
       if (s.idleStop) { try { s.idleStop(); } catch (_) { /* ignore */ } s.idleStop = null; }
@@ -401,7 +404,7 @@ return {
         await shell.run(spec);
         browserLog('档案已重置（下次启动自动重建全新 Edge profile）');
       } catch (err) {
-        console.error('[dsh-livefeed] 档案重置失败:', String((err && err.message) || err));
+        log.error('[dsh-livefeed] 档案重置失败:', String((err && err.message) || err));
       }
     }
     async function fetchViaBrowser(url) {
@@ -462,7 +465,7 @@ return {
       let template = BUILTIN_TEMPLATE;
       const custom = await fsRead(TEMPLATE_FILE);
       if (custom && custom.indexOf('_dshLivefeedDispatcher') >= 0) template = custom;
-      else if (custom) console.error('[dsh-livefeed] sources/_template.js 缺少调度器标记，回退内置模板');
+      else if (custom) log.error('[dsh-livefeed] sources/_template.js 缺少调度器标记，回退内置模板');
       if (!template) throw new Error('基类模板缺失：请确认运行目录存在 sources/_template.js');
       let script = '';
       if (source && source.script) {
@@ -575,9 +578,9 @@ return {
           parsed = extractJson(raw);
           if (parsed && Array.isArray(parsed.selected)) break;
         } catch (err) {
-          console.warn('[dsh-livefeed] judge call failed:', String((err && err.message) || err));
+          log.warn('[dsh-livefeed] judge call failed:', String((err && err.message) || err));
         }
-        if (attempt < 3) console.warn('[dsh-livefeed] judge parse failed, retry', attempt + '/3');
+        if (attempt < 3) log.warn('[dsh-livefeed] judge parse failed, retry', attempt + '/3');
       }
       const picked = [];
       const used = new Set();
@@ -635,14 +638,14 @@ return {
         const out = await runSourceScript(program, { mode: 'content', config: source, item });
         if (out && out.text) {
           if (isBlockPage(out.text)) {
-            console.log('[dsh-livefeed] block-page content skipped:', item.url);
+            log.info('[dsh-livefeed] block-page content skipped:', item.url);
             content = null;
           } else {
             content = out.text;
           }
         }
       } catch (err) {
-        console.error('[dsh-livefeed] fineSearch failed:', String(err && err.message || err));
+        log.error('[dsh-livefeed] fineSearch failed:', String(err && err.message || err));
       }
       const snippet = String(item.snippet || '');
       const fallbackText = content || snippet;
@@ -674,7 +677,7 @@ return {
           }
         }
       } catch (err) {
-        console.error('[dsh-livefeed] summarize failed:', String((err && err.message) || err));
+        log.error('[dsh-livefeed] summarize failed:', String((err && err.message) || err));
       }
       for (let i = 0; i < entries.length; i++) {
         const e = entries[i];
@@ -769,7 +772,7 @@ return {
         return ageBase >= cutoff;
       });
       const purged = before - state.cards.length;
-      if (purged > 0) console.log('[dsh-livefeed] 清除过期已读卡片 ' + purged + ' 条（保留 ' + state.config.retentionDays + ' 天）');
+      if (purged > 0) log.info('[dsh-livefeed] 清除过期已读卡片 ' + purged + ' 条（保留 ' + state.config.retentionDays + ' 天）');
     }
 
     async function loadAll() {
@@ -846,7 +849,7 @@ return {
             failed = true;
             state.sourceErrors.push({ sourceId: String(source.id || ''), message: String((err && err.message) || err) });
             state.lastError = String((err && err.message) || err);
-            console.error('[dsh-livefeed] source failed:', source.id, err);
+            log.error('[dsh-livefeed] source failed:', source.id, err);
           }
           state.cycleStats = stats;
           if (!failed) { state.lastError = undefined; state.retrying = 0; }
@@ -859,7 +862,7 @@ return {
         if (failed) scheduleRetry();
       } catch (err) {
         state.lastError = String((err && err.message) || err);
-        console.error('[dsh-livefeed] cycle failed:', err);
+        log.error('[dsh-livefeed] cycle failed:', err);
         state.lastRunAt = Date.now(); // 防御性：外层失败同样延后下次尝试
         await saveState();
         scheduleRetry();
@@ -874,7 +877,7 @@ return {
       if (state.retrying >= RETRY_MAX) { state.retrying = 0; return; }
       state.retrying += 1;
       const delay = RETRY_BASE_MS * Math.pow(2, state.retrying - 1);
-      console.log('[dsh-livefeed] schedule retry', state.retrying, 'delay ms', delay);
+      log.info('[dsh-livefeed] schedule retry', state.retrying, 'delay ms', delay);
       ctx.timeout(() => {
         if (!disposed) runCycle();
       }, delay);
@@ -995,7 +998,7 @@ return {
 
     // ══ 启动：装载 + HTTP 路由 + 动态 harness + 定时器（随 fiber 自动清理）══
     ctx.effect(() => {
-      console.log('[dsh-livefeed] config dir:', CONFIG_DIR);
+      log.info('[dsh-livefeed] config dir:', CONFIG_DIR);
       loadAll();
 
       const stopRoute = ctx.webServer.register({
@@ -1044,7 +1047,7 @@ return {
       const stopBoot = ctx.timeout(() => {
         if (disposed || state.paused) return;
         if (state.lastRunAt !== undefined && Date.now() - state.lastRunAt < intervalMs()) {
-          console.log('[dsh-livefeed] 距上次采集不足间隔，跳过启动采集（上次: ' + new Date(state.lastRunAt).toISOString() + '，间隔: ' + intervalMs() + 'ms）');
+          log.info('[dsh-livefeed] 距上次采集不足间隔，跳过启动采集（上次: ' + new Date(state.lastRunAt).toISOString() + '，间隔: ' + intervalMs() + 'ms）');
           return;
         }
         runCycle();
